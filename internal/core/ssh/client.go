@@ -116,7 +116,11 @@ func Dial(host *model.Host) (*Client, error) {
 	}
 
 	addr := net.JoinHostPort(host.Address, fmt.Sprintf("%d", port))
-	tcpConn, err := net.DialTimeout("tcp", addr, config.Timeout)
+	dialer := &net.Dialer{
+		Timeout:   config.Timeout,
+		KeepAlive: 30 * time.Second,
+	}
+	tcpConn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("无法连接到 %s: %w", addr, err)
 	}
