@@ -229,7 +229,7 @@ func (v *AppView) renderSidebarHostList(c *ui.Context, t *ui.Theme) {
 	// 边栏搜索框：直接位于列表顶部，消除对主区域空间的占用
 	ui.TextInput(c, &v.searchQuery).Placeholder("搜索主机...")
 
-	ui.Scroll(c).Grow(1).Children(func() {
+	ui.Scroll(c).Fill().Children(func() {
 		ui.Column(c).Gap(1).Children(func() {
 			query := strings.ToLower(strings.TrimSpace(v.searchQuery))
 
@@ -256,7 +256,7 @@ func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
 	activeSession := v.getActiveSession()
 
 	if activeSession == nil {
-		ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Padding(t.Space(4)).Children(func() {
+		ui.Column(c).Fill().Center().Gap(t.Space(3)).Padding(t.Space(4)).Children(func() {
 			ui.Icon(c, IconFolder).TextColor(t.TextMuted).Width(32).Height(32)
 			ui.Text(c, "暂无活跃终端连接").FontSize(13).Bold().TextColor(t.TextMuted)
 			ui.Text(c, "请在「主机节点」中连接一台服务器或开启本地终端以浏览远程文件。").FontSize(11).TextColor(t.TextMuted)
@@ -315,9 +315,9 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 // 右侧工作区 (多标签管理 + 概览仪表盘 / 全屏终端 / 就地代码编辑器)
 func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
-		// 顶部多标签栏 (复刻 docker-mate 的 Tabs 标签导航风格)
+		// 顶部多标签栏 (紧凑现代 32px 原生桌面风格)
 		tabToClose := -1
-		ui.Row(c).Height(36).Shrink(0).Background(ColSidebarBg).Padding(4, t.Space(2)).Gap(4).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
+		ui.Row(c).Height(32).Background(ui.Hex("#F1F3F5")).Border(1, ColSidebarBorder).Padding(0, t.Space(2)).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 			for i := range v.tabs {
 				index := i
 				tab := v.tabs[index]
@@ -338,74 +338,42 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					title += " ●"
 				}
 
-				// 方案 1: 同色系色标法 - 获取所属节点专属色彩
-				var hColor HostThemeColor
-				hasColor := false
-				if tab.Session != nil {
-					hColor = tab.Session.HostColor()
-					hasColor = true
+				tabItem := ui.Row(c).Height(26).Background(tabBg).Border(1, borderCol).Radius(t.Radius - 2).Padding(0, t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1.5))
+				if tabItem.Hovered() && !isActive {
+					tabItem.Background(ui.Hex("#E5E9EE"))
 				}
 
-				tabItem := ui.Column(c).Height(28).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Clip()
-
-				// 顶部 2px 归属色彩标记条 (激活时 100% 饱和，未激活时 40% 微透)
-				if hasColor {
-					topAlpha := float32(0.4)
-					if isActive {
-						topAlpha = 1.0
-					}
-					ui.Box(c).Height(2).FillWidth().Background(hColor.Accent.Alpha(topAlpha))
-				} else {
-					ui.Box(c).Height(2).FillWidth().Background(ui.Transparent)
-				}
-
-				// Tab 内容区域 (图标、标题、关闭按钮)
-				ui.Row(c).Grow(1).Padding(0, t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-					iconCol := textColor
-					if hasColor {
-						if isActive {
-							iconCol = hColor.Accent
-						} else {
-							iconCol = hColor.Accent.Alpha(0.7)
-						}
+				tabItem.Children(func() {
+					// 方案 1: 同色系色标法 - 同一主机下的终端与文件共享 6px 精细专属色点
+					if tab.Session != nil {
+						hColor := tab.Session.HostColor()
+						ui.Box(c).Width(6).Height(6).Radius(3).Background(hColor.Accent)
 					}
 
-					switch tab.Type {
-					case TabTypeOverview:
-						ui.Icon(c, IconActivity).TextColor(iconCol).Width(12).Height(12)
-					case TabTypeSession:
-						ui.Icon(c, IconTerminal).TextColor(iconCol).Width(12).Height(12)
-					case TabTypeEditor:
-						ui.Icon(c, IconFile).TextColor(iconCol).Width(12).Height(12)
-					}
+					ui.Text(c, title).FontSize(11.5).TextColor(textColor).Bold()
 
-					ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
-
-					// 非主概览标签提供微型矢量 X 关闭图标按钮 (无边框，极简原生桌面质感)
+					// 非主概览标签提供微型矢量 X 关闭图标
 					if index > 0 {
-						closeBtn := ui.ButtonBase(c).Width(16).Height(16).Radius(3).Center()
-						closeIconCol := t.TextMuted
+						closeBtn := ui.Row(c).Width(16).Height(16).Radius(2).Center().Children(func() {
+							ui.Icon(c, IconClose).Width(9).Height(9).TextColor(t.TextMuted)
+						})
 						if closeBtn.Hovered() {
 							closeBtn.Background(ui.Hex("#E2E8F0"))
-							closeIconCol = t.Text
 						}
-						closeBtn.Children(func() {
-							ui.Icon(c, IconClose).Width(9).Height(9).TextColor(closeIconCol)
-						})
 						if closeBtn.Clicked() {
 							tabToClose = index
 						}
 					}
 				})
 
-				// 悬停提示
+				// 悬停提示完整信息
 				if tab.Type == TabTypeSession && tab.Session != nil {
 					tabItem.Tooltip(fmt.Sprintf("主机会话: %s (%s)", tab.Session.Host.Name, tab.Session.Host.Address))
 				} else if tab.Type == TabTypeEditor && tab.Editor != nil && tab.Session != nil {
 					tabItem.Tooltip(fmt.Sprintf("所属主机: %s\n文件路径: %s", tab.Session.Host.Name, tab.Editor.Path))
 				}
 
-				if tabItem.Clicked() {
+				if tabToClose != index && tabItem.Clicked() {
 					v.activeTabIndex = index
 				}
 			}
@@ -446,7 +414,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 
 // 主机属性审查与操作面板 (精简首页：不展示看板数量与功能特性，仅保留添加主机、刷新列表与当前选中主机信息及操作)
 func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
-	ui.Scroll(c).Grow(1).Padding(t.Space(6)).Children(func() {
+	ui.Scroll(c).Fill().Padding(t.Space(6)).Children(func() {
 		ui.Column(c).Gap(t.Space(4)).Children(func() {
 			// 顶部功能条：仅「刷新列表」与「+ 添加 SSH 主机」
 			ui.Row(c).Height(38).AlignItems(ui.Center).Children(func() {
@@ -467,15 +435,16 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 				})
 			})
 
+			// 顶栏下方的横线分隔
 			ui.Box(c).Height(1).Background(t.Border)
 
-			// 下方展示当前选中主机的信息和操作
+			// 下方展示当前选中主机的信息和操作（无大外盒包裹，由横线自然分隔）
 			v.renderSelectedHostCard(c, t)
 		})
 	})
 }
 
-// 当前选中主机的详细审查卡片
+// 当前选中主机的详细审查内容 (彻底去除大外框盒子，由横线自然分段)
 func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 	var host *model.Host
 	if v.selectedHostID != "" {
@@ -488,7 +457,7 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 	}
 
 	if host == nil {
-		ui.Column(c).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Padding(t.Space(8)).Center().Gap(t.Space(2)).Children(func() {
+		ui.Column(c).Padding(t.Space(10)).Center().Gap(t.Space(2)).Children(func() {
 			ui.Icon(c, IconServer).TextColor(t.TextMuted).Width(36).Height(36)
 			ui.Text(c, "未选择主机").FontSize(14).Bold().TextColor(t.TextMuted)
 			ui.Text(c, "请在左侧列表中点击选择一台主机查看配置，或点击「添加 SSH 主机」新建").FontSize(12).TextColor(t.TextMuted)
@@ -496,8 +465,8 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 		return
 	}
 
-	ui.Column(c).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Padding(t.Space(5)).Gap(t.Space(4)).Children(func() {
-		// 顶部主机名与操作按钮栏
+	ui.Column(c).Gap(t.Space(5)).Children(func() {
+		// 1. 主机名与操作按钮栏
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Gap(t.Space(1)).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
@@ -532,11 +501,12 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 			})
 		})
 
+		// 模块间横线分隔
 		ui.Box(c).Height(1).Background(t.Border)
 
-		// 属性配置明细网格 (现代化两栏表单设计)
-		ui.Column(c).Background(ui.Hex("#FAFBFC")).Border(1, t.Border).Padding(t.Space(4)).Radius(t.Radius).Gap(t.Space(3)).Children(func() {
-			ui.Text(c, "连接配置与安全认证").FontSize(12.5).Bold().TextColor(t.Text)
+		// 2. 属性配置明细
+		ui.Column(c).Gap(t.Space(4)).Children(func() {
+			ui.Text(c, "连接配置与安全认证").FontSize(13).Bold().TextColor(t.Text)
 
 			// 属性行 1
 			ui.Row(c).Gap(t.Space(8)).Children(func() {
@@ -616,7 +586,7 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 		}
 	}
 
-	ui.Row(c).Height(26).Shrink(0).Background(ColSidebarBg).Padding(0, t.Space(3)).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
+	ui.Row(c).Height(26).Background(ColSidebarBg).Padding(0, t.Space(3)).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
 		// 左边：状态指示点 + 就绪状态
 		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
