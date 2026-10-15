@@ -63,9 +63,11 @@ func New() (*App, error) {
 		return nil, fmt.Errorf("failed to load initial data: %w", err)
 	}
 
-	// 如果库为空，填充体验示例数据
+	// 如果库为空，填充体验示例数据；若已存在数据，确保内置的本机终端存在
 	if len(a.Hosts) == 0 && len(a.Groups) == 0 {
 		a.seedDefaultData()
+	} else {
+		a.ensureLocalHost()
 	}
 
 	return a, nil
@@ -152,5 +154,37 @@ func (a *App) seedDefaultData() {
 		})
 	}
 
+	_ = a.ReloadData()
+}
+
+// ensureLocalHost 保证任何时候库中都存在至少一个本机终端入口
+func (a *App) ensureLocalHost() {
+	for _, h := range a.Hosts {
+		if h.AuthType == model.AuthTypeLocal {
+			return
+		}
+	}
+
+	var targetGroupID string
+	for _, g := range a.Groups {
+		if g.Name == "开发与测试环境" {
+			targetGroupID = g.ID
+			break
+		}
+	}
+	if targetGroupID == "" && len(a.Groups) > 0 {
+		targetGroupID = a.Groups[0].ID
+	}
+
+	_ = a.Store.SaveHost(&model.Host{
+		GroupID:     targetGroupID,
+		Name:        "本机终端 (Local)",
+		Address:     "localhost",
+		Port:        0,
+		Username:    "local",
+		AuthType:    model.AuthTypeLocal,
+		Description: "本地 Shell 终端直接交互",
+		ColorTag:    "#059669",
+	})
 	_ = a.ReloadData()
 }

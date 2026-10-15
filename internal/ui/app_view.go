@@ -151,41 +151,72 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 
 					// 主机项（原生桌面紧凑行）
 					for _, h := range groupHosts {
-						host := h
-						isSelected := v.selectedHostID == host.ID
+						v.renderHostRow(c, t, h)
+					}
+				}
 
-						rowBg := ui.Hex("#F8F9FA")
-						borderCol := ui.Hex("#F8F9FA")
-						if isSelected {
-							rowBg = ui.Hex("#EBF1FA")
-							borderCol = ui.Hex("#B8D3F7")
+				// 渲染未分组或无归属的主机
+				var ungroupedHosts []*model.Host
+				for _, h := range v.app.Hosts {
+					found := false
+					for _, g := range v.app.Groups {
+						if h.GroupID == g.ID {
+							found = true
+							break
 						}
+					}
+					if !found {
+						if query == "" || strings.Contains(strings.ToLower(h.Name), query) || strings.Contains(strings.ToLower(h.Address), query) {
+							ungroupedHosts = append(ungroupedHosts, h)
+						}
+					}
+				}
 
-						ui.Row(c).Background(rowBg).Border(1, borderCol).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-							// 状态绿点 (矢量圆)
-							ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
+				if len(ungroupedHosts) > 0 {
+					ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "未分组主机").FontSize(11).Bold().TextColor(t.TextMuted)
+						ui.Spacer(c)
+						ui.Text(c, strconv.Itoa(len(ungroupedHosts))).FontSize(11).TextColor(ui.Hex("#9AA2B1"))
+					})
 
-							// 主机信息
-							ui.Column(c).Grow(1).Gap(t.Space(0.5)).Children(func() {
-								ui.Text(c, host.Name).FontSize(12).Bold().TextColor(t.Text)
-								if host.AuthType == model.AuthTypeLocal {
-									ui.Text(c, "本地 Shell 终端").FontSize(11).TextColor(t.TextMuted)
-								} else {
-									ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(11).TextColor(t.TextMuted)
-								}
-							})
-
-							// 连接按钮
-							if ui.Button(c, "连接").Clicked() {
-								v.openHostSession(host)
-							}
-						}).OnClick(func() {
-							v.selectedHostID = host.ID
-						})
+					for _, h := range ungroupedHosts {
+						v.renderHostRow(c, t, h)
 					}
 				}
 			})
 		})
+	})
+}
+
+// 辅助渲染单行主机资产项
+func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
+	host := h
+	isSelected := v.selectedHostID == host.ID
+
+	rowBg := ui.Hex("#F8F9FA")
+	borderCol := ui.Hex("#F8F9FA")
+	if isSelected {
+		rowBg = ui.Hex("#EBF1FA")
+		borderCol = ui.Hex("#B8D3F7")
+	}
+
+	ui.Row(c).Background(rowBg).Border(1, borderCol).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
+
+		ui.Column(c).Grow(1).Gap(t.Space(0.5)).Children(func() {
+			ui.Text(c, host.Name).FontSize(12).Bold().TextColor(t.Text)
+			if host.AuthType == model.AuthTypeLocal {
+				ui.Text(c, "本地 Shell 终端").FontSize(11).TextColor(t.TextMuted)
+			} else {
+				ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(11).TextColor(t.TextMuted)
+			}
+		})
+
+		if ui.Button(c, "连接").Clicked() {
+			v.openHostSession(host)
+		}
+	}).OnClick(func() {
+		v.selectedHostID = host.ID
 	})
 }
 
