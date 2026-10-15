@@ -45,9 +45,9 @@ type AppView struct {
 func NewAppView(application *app.App) *AppView {
 	return &AppView{
 		app:          application,
-		theme:        ModernDarkTheme(),
+		theme:        ModernLightTheme(),
 		sidebarWidth: 260,
-		tabs:         []string{"欢迎与概览"},
+		tabs:         []string{"Overview"},
 		formPort:     "22",
 		formUsername: "root",
 		formAuthType: "password",
@@ -56,12 +56,11 @@ func NewAppView(application *app.App) *AppView {
 
 // View 每一帧渲染入口（GPU 原生自绘）
 func (v *AppView) View(c *ui.Context) {
-	// 应用专业极客深色主题
 	c.SetTheme(v.theme)
 	t := c.Theme()
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		// 1. 顶部现代化无缝控制栏
+		// 1. 顶部无缝控制栏
 		v.renderTopBar(c, t)
 
 		// 2. 主体工作区（水平分屏：左侧边栏 + 右侧工作区）
@@ -71,7 +70,7 @@ func (v *AppView) View(c *ui.Context) {
 			v.renderWorkspace(c, t)
 		}).Fill()
 
-		// 3. 底部极简状态栏
+		// 3. 底部状态栏
 		v.renderStatusBar(c, t)
 	})
 
@@ -81,52 +80,54 @@ func (v *AppView) View(c *ui.Context) {
 	}
 }
 
-// 顶部现代化控制栏 (类似 Linear / Zed 顶栏)
+// 顶部现代化控制栏 (macOS / Linear 浅色风格，纯文字与徽标，无 emoji)
 func (v *AppView) renderTopBar(c *ui.Context, t *ui.Theme) {
-	ui.Row(c).Height(44).Background(ui.Hex("#0D121F")).Padding(t.Space(2), t.Space(4)).Gap(t.Space(3)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
-		// Logo 品牌标识
+	ui.Row(c).Height(46).Background(t.Surface).Padding(t.Space(2), t.Space(4)).Gap(t.Space(3)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
+		// 应用品牌文本
 		ui.Row(c).Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "⚡").FontSize(16)
-			ui.Text(c, "GoShell").FontSize(15).Bold().TextColor(ui.Hex("#38BDF8"))
+			ui.Text(c, "GoShell").FontSize(15).Bold().TextColor(t.Text)
+			ui.Row(c).Background(ui.Hex("#F1F5F9")).Border(1, t.Border).Padding(t.Space(0.5), t.Space(1.5)).Radius(4).Children(func() {
+				ui.Text(c, "v0.1.0").FontSize(10).TextColor(t.TextMuted)
+			})
 		})
 
-		ui.Text(c, "•").TextColor(ui.Hex("#334155")).FontSize(12)
+		ui.Text(c, "/").TextColor(ui.Hex("#CBD5E1")).FontSize(13)
 
-		// 新建主机按钮
-		if ui.PrimaryButton(c, "+ 新建主机").Clicked() {
+		// 新建主机操作
+		if ui.PrimaryButton(c, "New Host").Clicked() {
 			v.openCreateModal()
 		}
 
-		// 胶囊搜索框
-		ui.Row(c).Background(ui.Hex("#172033")).Padding(t.Space(1), t.Space(2.5)).Radius(16).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, "⌕").FontSize(13).TextColor(t.TextMuted)
+		// 搜索过滤框
+		ui.Row(c).Background(ui.Hex("#F8FAFC")).Border(1, t.Border).Padding(t.Space(1), t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+			ui.Text(c, "Search:").FontSize(11).TextColor(t.TextMuted)
 			ui.TextInput(c, &v.searchQuery).Width(160)
 		})
 
 		ui.Spacer(c)
 
-		// 顶部状态信息微标
+		// 右侧统计与运行环境状态
 		ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-			ui.Row(c).Background(ui.Hex("#131C2E")).Padding(t.Space(1), t.Space(2.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-				ui.Text(c, "●").TextColor(t.Success).FontSize(9)
-				ui.Text(c, fmt.Sprintf("%d 台主机", len(v.app.Hosts))).FontSize(11).TextColor(t.Text)
+			ui.Row(c).Background(ui.Hex("#F8FAFC")).Border(1, t.Border).Padding(t.Space(1), t.Space(2.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+				ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
+				ui.Text(c, fmt.Sprintf("%d Hosts", len(v.app.Hosts))).FontSize(11).TextColor(t.Text)
 			})
 
-			ui.Row(c).Background(ui.Hex("#131C2E")).Padding(t.Space(1), t.Space(2.5)).Radius(t.Radius).Children(func() {
-				ui.Text(c, "Zero CGO · Metal GPU").FontSize(11).TextColor(ui.Hex("#38BDF8"))
+			ui.Row(c).Background(ui.Hex("#EFF6FF")).Border(1, ui.Hex("#BFDBFE")).Padding(t.Space(1), t.Space(2.5)).Radius(t.Radius).Children(func() {
+				ui.Text(c, "Native GPU Engine").FontSize(11).TextColor(ui.Hex("#1D4ED8"))
 			})
 		})
 	})
 }
 
-// 左侧资产树与主机列表
+// 左侧边栏 (资产与分组树)
 func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().Background(ui.Hex("#0B0F19")).Padding(t.Space(2.5)).Gap(t.Space(2)).Border(1, t.Border).Children(func() {
-		// 边栏标题与操作
+	ui.Column(c).Fill().Background(ui.Hex("#F8FAFC")).Padding(t.Space(3)).Gap(t.Space(2.5)).Border(1, t.Border).Children(func() {
+		// 边栏标题与刷新
 		ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "ASSETS").FontSize(11).Bold().TextColor(ui.Hex("#64748B"))
+			ui.Text(c, "HOSTS").FontSize(11).Bold().TextColor(ui.Hex("#94A3B8"))
 			ui.Spacer(c)
-			if ui.Button(c, "刷新").Clicked() {
+			if ui.Button(c, "Refresh").Clicked() {
 				_ = v.app.ReloadData()
 			}
 		})
@@ -150,38 +151,37 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 						continue
 					}
 
-					// 分组头部（折叠胶囊感）
+					// 分组标题
 					ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-						ui.Text(c, "▾").FontSize(10).TextColor(ui.Hex("#64748B"))
-						ui.Text(c, group.Name).FontSize(12).Bold().TextColor(ui.Hex("#94A3B8"))
+						ui.Text(c, strings.ToUpper(group.Name)).FontSize(11).Bold().TextColor(t.TextMuted)
 						ui.Spacer(c)
-						ui.Text(c, fmt.Sprintf("%d", len(groupHosts))).FontSize(11).TextColor(ui.Hex("#475569"))
+						ui.Text(c, fmt.Sprintf("%d", len(groupHosts))).FontSize(11).TextColor(ui.Hex("#94A3B8"))
 					})
 
-					// 该组下的主机卡片
+					// 该组下的主机列表项
 					for _, h := range groupHosts {
 						host := h
 						isSelected := v.selectedHostID == host.ID
 
-						cardBg := ui.Hex("#111827")
-						borderColor := ui.Hex("#1E293B")
+						cardBg := t.Surface
+						borderCol := t.Border
 						if isSelected {
-							cardBg = ui.Hex("#1E293B")
-							borderColor = ui.Hex("#38BDF8")
+							cardBg = ui.Hex("#EFF6FF")
+							borderCol = ui.Hex("#93C5FD")
 						}
 
-						ui.Row(c).Background(cardBg).Border(1, borderColor).Padding(t.Space(2.5), t.Space(3)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2.5)).Children(func() {
-							// 状态指示圆点
-							ui.Text(c, "●").TextColor(t.Success).FontSize(8)
+						ui.Row(c).Background(cardBg).Border(1, borderCol).Padding(t.Space(2.5), t.Space(3)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2.5)).Children(func() {
+							// 状态绿点 (纯矢量自绘圆点)
+							ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
 
-							// 主机名与连接串
+							// 主机名与连接参数
 							ui.Column(c).Grow(1).Gap(t.Space(0.5)).Children(func() {
 								ui.Text(c, host.Name).FontSize(13).Bold().TextColor(t.Text)
 								ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(11).TextColor(t.TextMuted)
 							})
 
 							// 连接按钮
-							if ui.Button(c, "连接").Clicked() {
+							if ui.Button(c, "Connect").Clicked() {
 								v.openHostTab(host)
 							}
 						}).OnClick(func() {
@@ -196,35 +196,30 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 
 // 右侧工作区
 func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().Background(ui.Hex("#090D16")).Children(func() {
-		// 现代化标签栏
+	ui.Column(c).Fill().Background(t.Surface).Children(func() {
+		// 现代化多标签栏 (Safari / Linear 浅色标签风格)
 		if len(v.tabs) > 0 {
-			ui.Row(c).Height(38).Background(ui.Hex("#0D121F")).Padding(t.Space(1), t.Space(3)).Gap(t.Space(1)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
+			ui.Row(c).Height(38).Background(ui.Hex("#F1F5F9")).Padding(t.Space(1), t.Space(3)).Gap(t.Space(1)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
 				for i, tab := range v.tabs {
 					index := i
 					title := tab
 					isActive := v.activeTabIndex == index
 
-					tabBg := ui.Hex("#0D121F")
-					textColor := ui.Hex("#94A3B8")
-					borderCol := ui.Hex("#0D121F")
+					tabBg := ui.Hex("#F1F5F9")
+					textColor := t.TextMuted
+					borderCol := ui.Hex("#F1F5F9")
 					if isActive {
-						tabBg = ui.Hex("#162032")
-						textColor = ui.Hex("#F8FAFC")
-						borderCol = ui.Hex("#38BDF8")
+						tabBg = t.Surface
+						textColor = t.Text
+						borderCol = t.Border
 					}
 
 					ui.Row(c).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(t.Space(1.5), t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-						if index == 0 {
-							ui.Text(c, "✦").FontSize(11).TextColor(ui.Hex("#38BDF8"))
-						} else {
-							ui.Text(c, ">_").FontSize(11).TextColor(t.Success)
-						}
 						ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
 
-						// 允许关闭非主页 Tab
+						// 非首个标签允许关闭
 						if index > 0 {
-							if ui.Button(c, "×").Clicked() {
+							if ui.Button(c, "x").Clicked() {
 								v.closeTab(index)
 							}
 						}
@@ -244,48 +239,48 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// 欢迎与资产概览面板（深色现代化卡片风格）
+// 概览面板 (纯白极简卡片，高对比度，清晰排版)
 func (v *AppView) renderWelcomeDashboard(c *ui.Context, t *ui.Theme) {
 	ui.Scroll(c).Fill().Padding(t.Space(7)).Children(func() {
 		ui.Column(c).Gap(t.Space(6)).Children(func() {
-			// 标题与理念
+			// 标题区
 			ui.Column(c).Gap(t.Space(1.5)).Children(func() {
 				ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "GoShell 远程终端控制台").FontSize(24).Bold().TextColor(t.Text)
-					ui.Row(c).Background(ui.Hex("#0369A1")).Padding(t.Space(0.5), t.Space(2)).Radius(12).Children(func() {
-						ui.Text(c, "v0.1.0-alpha").FontSize(11).TextColor(ui.Hex("#FFFFFF"))
+					ui.Text(c, "GoShell Console").FontSize(22).Bold().TextColor(t.Text)
+					ui.Row(c).Background(ui.Hex("#EFF6FF")).Border(1, ui.Hex("#BFDBFE")).Padding(t.Space(0.5), t.Space(2)).Radius(4).Children(func() {
+						ui.Text(c, "Ready").FontSize(11).TextColor(ui.Hex("#1D4ED8"))
 					})
 				})
-				ui.Text(c, "纯 Go 编写、免 cgo、GPU 原生自绘。告别 Electron 臃肿与 Java 迟缓，秒开秒连。").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "Pure Go native desktop client for SSH terminal and remote file management.").FontSize(13).TextColor(t.TextMuted)
 			})
 
-			// 核心指标与功能卡片
+			// 核心功能卡片
 			ui.Row(c).Gap(t.Space(4)).Children(func() {
-				// 卡片 1: 极速会话
-				ui.Column(c).Background(ui.Hex("#111827")).Border(1, ui.Hex("#1F293D")).Padding(t.Space(5)).Radius(t.Radius).Width(250).Gap(t.Space(2)).Children(func() {
-					ui.Text(c, "🚀 极速原生会话").FontSize(14).Bold().TextColor(ui.Hex("#38BDF8"))
-					ui.Text(c, "内置 Ghostty 终端渲染引擎与多标签分屏，即刻开启低延迟交互。").FontSize(12).TextColor(t.TextMuted)
-					if ui.PrimaryButton(c, "+ 快速添加服务器").Clicked() {
+				// 卡片 1
+				ui.Column(c).Background(t.Surface).Border(1, t.Border).Padding(t.Space(5)).Radius(t.Radius).Width(240).Gap(t.Space(2)).Children(func() {
+					ui.Text(c, "Instant Terminal").FontSize(14).Bold().TextColor(t.Text)
+					ui.Text(c, "Hardware-accelerated terminal via libghostty-vt with tab management and split panes.").FontSize(12).TextColor(t.TextMuted)
+					if ui.PrimaryButton(c, "Add New Host").Clicked() {
 						v.openCreateModal()
 					}
 				})
 
-				// 卡片 2: 凭据保险库
-				ui.Column(c).Background(ui.Hex("#111827")).Border(1, ui.Hex("#1F293D")).Padding(t.Space(5)).Radius(t.Radius).Width(250).Gap(t.Space(2)).Children(func() {
-					ui.Text(c, "🔒 AES-256 安全保险库").FontSize(14).Bold().TextColor(ui.Hex("#10B981"))
-					ui.Text(c, "主机密码与密钥经过强散列加密落地于本地纯 Go SQLite。").FontSize(12).TextColor(t.TextMuted)
-					ui.Text(c, "✓ 凭据已加密").FontSize(11).TextColor(t.Success)
+				// 卡片 2
+				ui.Column(c).Background(t.Surface).Border(1, t.Border).Padding(t.Space(5)).Radius(t.Radius).Width(240).Gap(t.Space(2)).Children(func() {
+					ui.Text(c, "Encrypted Vault").FontSize(14).Bold().TextColor(t.Text)
+					ui.Text(c, "Host credentials and private keys are encrypted locally using AES-256-GCM in SQLite.").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "Encrypted on disk").FontSize(11).TextColor(t.Success)
 				})
 
-				// 卡片 3: SFTP 与性能监控
-				ui.Column(c).Background(ui.Hex("#111827")).Border(1, ui.Hex("#1F293D")).Padding(t.Space(5)).Radius(t.Radius).Width(250).Gap(t.Space(2)).Children(func() {
-					ui.Text(c, "📈 FinalShell 看板").FontSize(14).Bold().TextColor(ui.Hex("#F59E0B"))
-					ui.Text(c, "即将在此提供实时 CPU、内存、网络波形与 SFTP 拖拽传输。").FontSize(12).TextColor(t.TextMuted)
-					ui.Text(c, "即将进入 Phase 2").FontSize(11).TextColor(t.Warning)
+				// 卡片 3
+				ui.Column(c).Background(t.Surface).Border(1, t.Border).Padding(t.Space(5)).Radius(t.Radius).Width(240).Gap(t.Space(2)).Children(func() {
+					ui.Text(c, "Remote SFTP & Stats").FontSize(14).Bold().TextColor(t.Text)
+					ui.Text(c, "Integrated file explorer and server metrics chart will be loaded in Phase 2.").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "Upcoming in Phase 2").FontSize(11).TextColor(t.Warning)
 				})
 			})
 
-			// 选中的主机详情卡片
+			// 选中主机详情卡片
 			if v.selectedHostID != "" {
 				var host *model.Host
 				for _, h := range v.app.Hosts {
@@ -296,17 +291,17 @@ func (v *AppView) renderWelcomeDashboard(c *ui.Context, t *ui.Theme) {
 				}
 
 				if host != nil {
-					ui.Column(c).Background(ui.Hex("#131B2E")).Border(1, ui.Hex("#2563EB")).Padding(t.Space(5)).Radius(t.Radius).Gap(t.Space(3.5)).Children(func() {
+					ui.Column(c).Background(ui.Hex("#F8FAFC")).Border(1, ui.Hex("#CBD5E1")).Padding(t.Space(5)).Radius(t.Radius).Gap(t.Space(3.5)).Children(func() {
 						ui.Row(c).AlignItems(ui.Center).Children(func() {
 							ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-								ui.Text(c, "●").TextColor(t.Success).FontSize(10)
+								ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
 								ui.Text(c, host.Name).FontSize(16).Bold().TextColor(t.Text)
 							})
 							ui.Spacer(c)
-							if ui.Button(c, "✏ 编辑配置").Clicked() {
+							if ui.Button(c, "Edit").Clicked() {
 								v.openEditModal(host)
 							}
-							if ui.Button(c, "🗑 删除").Clicked() {
+							if ui.Button(c, "Delete").Clicked() {
 								_ = v.app.Store.DeleteHost(host.ID)
 								v.selectedHostID = ""
 								_ = v.app.ReloadData()
@@ -314,26 +309,26 @@ func (v *AppView) renderWelcomeDashboard(c *ui.Context, t *ui.Theme) {
 						})
 
 						ui.Row(c).Gap(t.Space(6)).Children(func() {
-							ui.Column(c).Gap(t.Space(1)).Children(func() {
-								ui.Text(c, "主机地址").FontSize(11).TextColor(t.TextMuted)
-								ui.Text(c, fmt.Sprintf("%s:%d", host.Address, host.Port)).FontSize(13).Bold()
+							ui.Column(c).Gap(t.Space(0.5)).Children(func() {
+								ui.Text(c, "Host Address").FontSize(11).TextColor(t.TextMuted)
+								ui.Text(c, fmt.Sprintf("%s:%d", host.Address, host.Port)).FontSize(13).Bold().TextColor(t.Text)
 							})
-							ui.Column(c).Gap(t.Space(1)).Children(func() {
-								ui.Text(c, "登录用户").FontSize(11).TextColor(t.TextMuted)
-								ui.Text(c, host.Username).FontSize(13).Bold()
+							ui.Column(c).Gap(t.Space(0.5)).Children(func() {
+								ui.Text(c, "Username").FontSize(11).TextColor(t.TextMuted)
+								ui.Text(c, host.Username).FontSize(13).Bold().TextColor(t.Text)
 							})
-							ui.Column(c).Gap(t.Space(1)).Children(func() {
-								ui.Text(c, "认证方式").FontSize(11).TextColor(t.TextMuted)
-								ui.Text(c, string(host.AuthType)).FontSize(13).Bold()
+							ui.Column(c).Gap(t.Space(0.5)).Children(func() {
+								ui.Text(c, "Auth Method").FontSize(11).TextColor(t.TextMuted)
+								ui.Text(c, string(host.AuthType)).FontSize(13).Bold().TextColor(t.Text)
 							})
 						})
 
 						if host.Description != "" {
-							ui.Text(c, "备注: "+host.Description).FontSize(12).TextColor(t.TextMuted)
+							ui.Text(c, "Note: "+host.Description).FontSize(12).TextColor(t.TextMuted)
 						}
 
 						ui.Row(c).Gap(t.Space(3)).Children(func() {
-							if ui.PrimaryButton(c, "▶ 立即连接 SSH 终端").Clicked() {
+							if ui.PrimaryButton(c, "Open SSH Session").Clicked() {
 								v.openHostTab(host)
 							}
 						})
@@ -348,13 +343,12 @@ func (v *AppView) renderWelcomeDashboard(c *ui.Context, t *ui.Theme) {
 func (v *AppView) renderActiveSessionTab(c *ui.Context, t *ui.Theme) {
 	tabTitle := v.tabs[v.activeTabIndex]
 
-	ui.Column(c).Fill().Padding(t.Space(8)).Center().Gap(t.Space(4)).Children(func() {
-		ui.Text(c, "⚡").FontSize(44)
-		ui.Text(c, fmt.Sprintf("会话已就绪: %s", tabTitle)).FontSize(20).Bold().TextColor(t.Text)
-		ui.Text(c, "Phase 1: 基础设施、纯 Go 本地持久化与现代深色 UI 骨架已就绪").FontSize(13).TextColor(t.Success)
-		ui.Text(c, "在下一阶段，此处将直接接入 Ghostty VT 终端并渲染 SSH 数据流。").FontSize(13).TextColor(t.TextMuted)
+	ui.Column(c).Fill().Padding(t.Space(8)).Center().Gap(t.Space(3)).Children(func() {
+		ui.Text(c, fmt.Sprintf("Session Ready: %s", tabTitle)).FontSize(18).Bold().TextColor(t.Text)
+		ui.Text(c, "Phase 1: Foundation and local SQLite persistence completed.").FontSize(13).TextColor(t.Success)
+		ui.Text(c, "Phase 2 will mount the native Ghostty VT terminal and SSH stream right here.").FontSize(13).TextColor(t.TextMuted)
 
-		if ui.Button(c, "关闭当前标签页").Clicked() {
+		if ui.Button(c, "Close Tab").Clicked() {
 			v.closeTab(v.activeTabIndex)
 		}
 	})
@@ -362,21 +356,22 @@ func (v *AppView) renderActiveSessionTab(c *ui.Context, t *ui.Theme) {
 
 // 底部极简状态栏
 func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
-	ui.Row(c).Height(26).Background(ui.Hex("#0B0F19")).Padding(t.Space(1), t.Space(4)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
-		ui.Text(c, "● 就绪").TextColor(t.Success).FontSize(11)
-		ui.Text(c, " | 本地 SQLite: "+v.app.DataDir+"/goshell.db").FontSize(11).TextColor(ui.Hex("#64748B"))
+	ui.Row(c).Height(26).Background(ui.Hex("#F8FAFC")).Padding(t.Space(1), t.Space(4)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
+		ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
+		ui.Text(c, " Ready").TextColor(t.Success).FontSize(11)
+		ui.Text(c, " | SQLite: "+v.app.DataDir+"/goshell.db").FontSize(11).TextColor(t.TextMuted)
 		ui.Spacer(c)
-		ui.Text(c, "GoShell v0.1.0 (Phase 1 Ready)").FontSize(11).TextColor(ui.Hex("#64748B"))
+		ui.Text(c, "GoShell v0.1.0").FontSize(11).TextColor(t.TextMuted)
 	})
 }
 
-// 新建/编辑主机弹窗
+// 新建/编辑主机弹窗 (纯白卡片式，清晰现代)
 func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &v.modalOpen, func() {
-		ui.Column(c).Width(440).Background(ui.Hex("#111827")).Border(1, ui.Hex("#334155")).Padding(t.Space(6)).Radius(12).Gap(t.Space(3.5)).Children(func() {
-			title := "添加新主机"
+		ui.Column(c).Width(440).Background(t.Surface).Border(1, ui.Hex("#CBD5E1")).Padding(t.Space(6)).Radius(t.Radius).Gap(t.Space(3.5)).Children(func() {
+			title := "Add New Host"
 			if v.formID != "" {
-				title = "编辑主机配置"
+				title = "Edit Host Configuration"
 			}
 			ui.Text(c, title).FontSize(16).Bold().TextColor(t.Text)
 
@@ -385,54 +380,54 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 			}
 
 			// 字段：名称
-			ui.Text(c, "显示别名:").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "Alias / Name:").FontSize(12).TextColor(t.TextMuted)
 			ui.TextInput(c, &v.formName)
 
 			// 字段：主机与端口
 			ui.Row(c).Gap(t.Space(2)).Children(func() {
 				ui.Column(c).Grow(1).Children(func() {
-					ui.Text(c, "主机 IP / 域名:").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "Address / IP:").FontSize(12).TextColor(t.TextMuted)
 					ui.TextInput(c, &v.formAddress)
 				})
 				ui.Column(c).Width(90).Children(func() {
-					ui.Text(c, "端口:").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "Port:").FontSize(12).TextColor(t.TextMuted)
 					ui.TextInput(c, &v.formPort)
 				})
 			})
 
 			// 字段：用户名
-			ui.Text(c, "登录用户名:").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "Username:").FontSize(12).TextColor(t.TextMuted)
 			ui.TextInput(c, &v.formUsername)
 
 			// 认证方式选择
 			ui.Row(c).Gap(t.Space(3)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "认证方式:").FontSize(12).TextColor(t.TextMuted)
-				if ui.Button(c, "密码认证").Clicked() {
+				ui.Text(c, "Auth Method:").FontSize(12).TextColor(t.TextMuted)
+				if ui.Button(c, "Password").Clicked() {
 					v.formAuthType = "password"
 				}
-				if ui.Button(c, "私钥认证").Clicked() {
+				if ui.Button(c, "Private Key").Clicked() {
 					v.formAuthType = "key"
 				}
-				ui.Row(c).Background(ui.Hex("#1E293B")).Padding(t.Space(0.5), t.Space(2)).Radius(8).Children(func() {
-					ui.Text(c, "当前: "+v.formAuthType).FontSize(11).TextColor(ui.Hex("#38BDF8"))
+				ui.Row(c).Background(ui.Hex("#EFF6FF")).Border(1, ui.Hex("#BFDBFE")).Padding(t.Space(0.5), t.Space(2)).Radius(4).Children(func() {
+					ui.Text(c, "Active: "+v.formAuthType).FontSize(11).TextColor(ui.Hex("#1D4ED8"))
 				})
 			})
 
 			if v.formAuthType == "password" {
-				ui.Text(c, "密码:").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "Password:").FontSize(12).TextColor(t.TextMuted)
 				ui.TextInput(c, &v.formPassword)
 			} else {
-				ui.Text(c, "私钥路径 (如 ~/.ssh/id_rsa):").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "Key Path (e.g. ~/.ssh/id_rsa):").FontSize(12).TextColor(t.TextMuted)
 				ui.TextInput(c, &v.formKeyPath)
 			}
 
 			// 底部操作按钮
 			ui.Row(c).Gap(t.Space(2.5)).Children(func() {
 				ui.Spacer(c)
-				if ui.Button(c, "取消").Clicked() {
+				if ui.Button(c, "Cancel").Clicked() {
 					v.modalOpen = false
 				}
-				if ui.PrimaryButton(c, "保存配置").Clicked() {
+				if ui.PrimaryButton(c, "Save Host").Clicked() {
 					v.saveHostForm()
 				}
 			})
@@ -475,16 +470,16 @@ func (v *AppView) openEditModal(h *model.Host) {
 // 保存表单
 func (v *AppView) saveHostForm() {
 	if strings.TrimSpace(v.formName) == "" {
-		v.formErrorMsg = "请输入主机显示别名"
+		v.formErrorMsg = "Please enter a host alias"
 		return
 	}
 	if strings.TrimSpace(v.formAddress) == "" {
-		v.formErrorMsg = "请输入主机 IP 或域名"
+		v.formErrorMsg = "Please enter an IP address or hostname"
 		return
 	}
 	port, err := strconv.Atoi(strings.TrimSpace(v.formPort))
 	if err != nil || port <= 0 {
-		v.formErrorMsg = "请输入有效端口号 (1-65535)"
+		v.formErrorMsg = "Please enter a valid port number (1-65535)"
 		return
 	}
 
@@ -498,12 +493,12 @@ func (v *AppView) saveHostForm() {
 		AuthType:    model.AuthType(v.formAuthType),
 		Password:    v.formPassword,
 		KeyPath:     strings.TrimSpace(v.formKeyPath),
-		Description: "用户保存的连接",
+		Description: "User host entry",
 		ColorTag:    "#10B981",
 	}
 
 	if err := v.app.Store.SaveHost(h); err != nil {
-		v.formErrorMsg = fmt.Sprintf("保存失败: %v", err)
+		v.formErrorMsg = fmt.Sprintf("Save failed: %v", err)
 		return
 	}
 

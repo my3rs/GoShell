@@ -2,25 +2,26 @@ package ui
 
 import "github.com/egoist/mygo/ui"
 
-// ModernDarkTheme 提供类似 Zed / Warp / Linear 的极客现代深色主题
-func ModernDarkTheme() *ui.Theme {
-	t := ui.DarkTheme()
-	t.Dark = true
-	t.Background = ui.Hex("#090D16")     // 最底层画布：极夜星空黑
-	t.Surface = ui.Hex("#111827")        // 面板与卡片层：深灰深蓝
-	t.SurfaceHover = ui.Hex("#1E293B")   // 悬浮态：柔和提亮
-	t.SurfacePressed = ui.Hex("#334155") // 按下态
-	t.Border = ui.Hex("#1E293B")         // 边框：细腻极简暗边
-	t.Text = ui.Hex("#F8FAFC")           // 主文本：白皙清晰
-	t.TextMuted = ui.Hex("#94A3B8")      // 次级文本：柔和灰蓝
-	t.Accent = ui.Hex("#0284C7")         // 主强调色：科技海蓝
-	t.AccentHover = ui.Hex("#0369A1")
-	t.AccentPressed = ui.Hex("#075985")
-	t.AccentText = ui.Hex("#FFFFFF")
-	t.Danger = ui.Hex("#F43F5E")         // 警示红：亮粉红
-	t.Warning = ui.Hex("#F59E0B")        // 告警橙：琥珀金
-	t.Success = ui.Hex("#10B981")        // 成功在线：翡翠绿
-	t.Radius = 8                         // 现代化圆角
-	t.Spacing = 4                        // 精致间距
+// ModernLightTheme 提供极简、现代、高清晰度的浅色主题 (macOS / Linear Light 风格)
+func ModernLightTheme() *ui.Theme {
+	t := ui.LightTheme()
+	t.Dark = false
+	t.Background = ui.Hex("#F8FAFC")     // 主容器浅灰底 (Slate 50)
+	t.Surface = ui.Hex("#FFFFFF")        // 卡片与主视窗：纯白
+	t.SurfaceHover = ui.Hex("#F1F5F9")   // 悬浮态 (Slate 100)
+	t.SurfacePressed = ui.Hex("#E2E8F0") // 按下态 (Slate 200)
+	t.Border = ui.Hex("#E2E8F0")         // 极细清爽边界线 (Slate 200)
+	t.Text = ui.Hex("#0F172A")           // 高对比度正文深黑 (Slate 900)
+	t.TextMuted = ui.Hex("#64748B")      // 清晰次级灰蓝 (Slate 500)
+	t.Accent = ui.Hex("#2563EB")         // 经典科技蓝 (Blue 600)
+	t.AccentHover = ui.Hex("#1D4ED8")    // 蓝 (Blue 700)
+	t.AccentPressed = ui.Hex("#1E40AF")
+	t.AccentText = ui.Hex("#FFFFFF")     // 按钮文字白
+	t.Danger = ui.Hex("#DC2626")         // 警示红
+	t.Warning = ui.Hex("#D97706")        // 告警橙
+	t.Success = ui.Hex("#059669")        // 翡翠绿 (Emerald 600)
+	t.Radius = 6                         // 干练适度圆角
+	t.Spacing = 4                        // 间距基数
+	t.FontSize = 13
 	return t
 }

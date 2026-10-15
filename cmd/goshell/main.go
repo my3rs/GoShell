@@ -21,7 +21,7 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{
-			Title:   "GoShell - 极速轻量远程终端与文件管理",
+			Title:   "GoShell",
 			Width:   1120,
 			Height:  720,
 			Content: ui.View(appView.View),
