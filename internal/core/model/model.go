@@ -10,6 +10,7 @@ const (
 	AuthTypeKeyFile    AuthType = "key_file"    // 本地私钥文件
 	AuthTypeKeyContent AuthType = "key_content" // 直接存储私钥文本
 	AuthTypeAgent      AuthType = "agent"       // SSH-Agent 认证
+	AuthTypeLocal      AuthType = "local"       // 本地终端测试
 )
 
 // Group 主机分组

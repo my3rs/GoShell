@@ -21,10 +21,10 @@ type AppView struct {
 	// 布局尺寸
 	sidebarWidth float32
 
-	// 交互状态
+	// 交互状态与多标签会话
 	searchQuery    string
 	activeTabIndex int
-	tabs           []string
+	sessions       []*TerminalSession
 	selectedHostID string
 
 	// 新建/编辑主机弹窗表单状态
@@ -34,7 +34,7 @@ type AppView struct {
 	formAddress  string
 	formPort     string
 	formUsername string
-	formAuthType string // "password" 或 "key"
+	formAuthType string // "password", "key", "local"
 	formPassword string
 	formKeyPath  string
 	formGroupID  string
@@ -47,7 +47,6 @@ func NewAppView(application *app.App) *AppView {
 		app:          application,
 		theme:        ModernLightTheme(),
 		sidebarWidth: 240,
-		tabs:         []string{"资产概览"},
 		formPort:     "22",
 		formUsername: "root",
 		formAuthType: "password",
@@ -87,7 +86,7 @@ func (v *AppView) View(c *ui.Context) {
 	}
 }
 
-// 原生桌面工具栏 (紧凑 36px，标准桌面分界与操作按钮)
+// 原生桌面工具栏 (紧凑 36px)
 func (v *AppView) renderToolbar(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Height(36).Background(t.Surface).Padding(t.Space(1), t.Space(3)).Gap(t.Space(2)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
 		// 窗口标题
@@ -114,7 +113,7 @@ func (v *AppView) renderToolbar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// 左侧资产树与主机列表 (紧凑 26px 行高，标准 Finder/TablePlus 风格)
+// 左侧资产树与主机列表 (紧凑 26px 行高)
 func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(ui.Hex("#F8F9FA")).Padding(t.Space(1.5)).Gap(t.Space(1)).Border(1, t.Border).Children(func() {
 		// 边栏顶部小标题
@@ -169,12 +168,16 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 							// 主机信息
 							ui.Column(c).Grow(1).Gap(t.Space(0.5)).Children(func() {
 								ui.Text(c, host.Name).FontSize(12).Bold().TextColor(t.Text)
-								ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(11).TextColor(t.TextMuted)
+								if host.AuthType == model.AuthTypeLocal {
+									ui.Text(c, "本地 Shell 终端").FontSize(11).TextColor(t.TextMuted)
+								} else {
+									ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(11).TextColor(t.TextMuted)
+								}
 							})
 
 							// 连接按钮
 							if ui.Button(c, "连接").Clicked() {
-								v.openHostTab(host)
+								v.openHostSession(host)
 							}
 						}).OnClick(func() {
 							v.selectedHostID = host.ID
@@ -186,52 +189,63 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// 右侧工作区
+// 右侧工作区 (多标签管理 + 概览面板 / Ghostty 终端渲染)
 func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 原生多标签栏 (紧凑 30px)
-		if len(v.tabs) > 0 {
-			ui.Row(c).Height(30).Background(ui.Hex("#F1F3F5")).Padding(0, t.Space(2)).Gap(1).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
-				for i, tab := range v.tabs {
-					index := i
-					title := tab
-					isActive := v.activeTabIndex == index
-
-					tabBg := ui.Hex("#F1F3F5")
-					textColor := t.TextMuted
-					borderCol := ui.Hex("#E2E5E9")
-					if isActive {
-						tabBg = t.Surface
-						textColor = t.Text
-						borderCol = t.Border
-					}
-
-					ui.Row(c).Height(29).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(t.Space(1), t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-						ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
-
-						// 非主概览标签提供关闭选项
-						if index > 0 {
-							if ui.Button(c, "关闭").Clicked() {
-								v.closeTab(index)
-							}
-						}
-					}).OnClick(func() {
-						v.activeTabIndex = index
-					})
-				}
-			})
+		var tabTitles = []string{"资产概览"}
+		for _, s := range v.sessions {
+			tabTitles = append(tabTitles, s.Title)
 		}
 
+		ui.Row(c).Height(30).Background(ui.Hex("#F1F3F5")).Padding(0, t.Space(2)).Gap(1).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
+			for i, tab := range tabTitles {
+				index := i
+				title := tab
+				isActive := v.activeTabIndex == index
+
+				tabBg := ui.Hex("#F1F3F5")
+				textColor := t.TextMuted
+				borderCol := ui.Hex("#E2E5E9")
+				if isActive {
+					tabBg = t.Surface
+					textColor = t.Text
+					borderCol = t.Border
+				}
+
+				ui.Row(c).Height(29).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(t.Space(1), t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
+
+					// 非主概览标签提供关闭选项
+					if index > 0 {
+						if ui.Button(c, "关闭").Clicked() {
+							v.closeSessionTab(index)
+						}
+					}
+				}).OnClick(func() {
+					v.activeTabIndex = index
+				})
+			}
+		})
+
 		// 标签视窗内容
-		if v.activeTabIndex == 0 {
+		if v.activeTabIndex == 0 || len(v.sessions) == 0 {
 			v.renderInspectorDashboard(c, t)
 		} else {
-			v.renderActiveSessionTab(c, t)
+			sessionIndex := v.activeTabIndex - 1
+			if sessionIndex < len(v.sessions) {
+				session := v.sessions[sessionIndex]
+				session.Render(c, t, func() {
+					v.closeSessionTab(v.activeTabIndex)
+				})
+			} else {
+				v.renderInspectorDashboard(c, t)
+			}
 		}
 	})
 }
 
-// 主机属性审查与操作面板 (标准桌面软件属性面板风格，拒绝网页大卡片)
+// 主机属性审查与操作面板
 func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 	var host *model.Host
 	if v.selectedHostID != "" {
@@ -257,7 +271,11 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 			ui.Row(c).AlignItems(ui.Center).Children(func() {
 				ui.Column(c).Gap(t.Space(0.5)).Children(func() {
 					ui.Text(c, host.Name).FontSize(18).Bold().TextColor(t.Text)
-					ui.Text(c, fmt.Sprintf("%s (%s:%d)", host.Description, host.Address, host.Port)).FontSize(12).TextColor(t.TextMuted)
+					if host.AuthType == model.AuthTypeLocal {
+						ui.Text(c, fmt.Sprintf("本地操作系统原生终端会话 (%s)", host.Description)).FontSize(12).TextColor(t.TextMuted)
+					} else {
+						ui.Text(c, fmt.Sprintf("%s (%s:%d)", host.Description, host.Address, host.Port)).FontSize(12).TextColor(t.TextMuted)
+					}
 				})
 
 				ui.Spacer(c)
@@ -271,8 +289,8 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 						v.selectedHostID = ""
 						_ = v.app.ReloadData()
 					}
-					if ui.PrimaryButton(c, "发起 SSH 连接").Clicked() {
-						v.openHostTab(host)
+					if ui.PrimaryButton(c, "发起终端连接").Clicked() {
+						v.openHostSession(host)
 					}
 				})
 			})
@@ -296,6 +314,8 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 					v.renderFieldItem(c, t, "认证方式", string(host.AuthType))
 					if host.AuthType == model.AuthTypeKeyFile {
 						v.renderFieldItem(c, t, "私钥路径", host.KeyPath)
+					} else if host.AuthType == model.AuthTypeLocal {
+						v.renderFieldItem(c, t, "终端类型", "系统默认 Shell (zsh/bash)")
 					} else {
 						v.renderFieldItem(c, t, "密码状态", "已加密保存")
 					}
@@ -312,9 +332,9 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 			ui.Column(c).Background(ui.Hex("#F4F9F6")).Border(1, ui.Hex("#D2ECE0")).Padding(t.Space(3.5)).Radius(t.Radius).Gap(t.Space(1)).Children(func() {
 				ui.Row(c).Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
 					ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
-					ui.Text(c, "主机配置有效，处于就绪状态").FontSize(12).Bold().TextColor(ui.Hex("#0D6832"))
+					ui.Text(c, "第二阶段：原生 Ghostty VT 终端引擎已接入").FontSize(12).Bold().TextColor(ui.Hex("#0D6832"))
 				})
-				ui.Text(c, "第一阶段基础架构（数据持久化、凭据加解密与原生桌面框架）已全部通过。点击右上角即可开启交互终端。").FontSize(11).TextColor(ui.Hex("#2B6E4E"))
+				ui.Text(c, "点击右上角「发起终端连接」，即可在独立标签页中启动高性能 GPU 自绘终端并建立 SSH 通道。").FontSize(11).TextColor(ui.Hex("#2B6E4E"))
 			})
 		})
 	})
@@ -328,33 +348,19 @@ func (v *AppView) renderFieldItem(c *ui.Context, t *ui.Theme, label, value strin
 	})
 }
 
-// 会话标签页展示区
-func (v *AppView) renderActiveSessionTab(c *ui.Context, t *ui.Theme) {
-	tabTitle := v.tabs[v.activeTabIndex]
-
-	ui.Column(c).Fill().Padding(t.Space(6)).Center().Gap(t.Space(3)).Children(func() {
-		ui.Text(c, fmt.Sprintf("终端会话: %s", tabTitle)).FontSize(16).Bold().TextColor(t.Text)
-		ui.Text(c, "第一阶段：基础设施与本地持久化已完成").FontSize(12).TextColor(t.Success)
-		ui.Text(c, "第二阶段将在此处无缝接入 Ghostty 终端渲染与远程 SSH 实时数据流").FontSize(12).TextColor(t.TextMuted)
-
-		if ui.Button(c, "关闭当前会话").Clicked() {
-			v.closeTab(v.activeTabIndex)
-		}
-	})
-}
-
-// 底部紧凑状态栏 (标准 24px 高度)
+// 底部紧凑状态栏
 func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Height(24).Background(ui.Hex("#F1F3F5")).Padding(0, t.Space(3)).AlignItems(ui.Center).Border(1, t.Border).Children(func() {
 		ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
 		ui.Text(c, " 就绪").TextColor(t.Success).FontSize(11)
-		ui.Text(c, " | 本地数据库: "+v.app.DataDir+"/goshell.db").FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, fmt.Sprintf(" | 活跃会话: %d 个", len(v.sessions))).FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, " | 数据库: "+v.app.DataDir+"/goshell.db").FontSize(11).TextColor(t.TextMuted)
 		ui.Spacer(c)
-		ui.Text(c, "GoShell v0.1.0").FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, "GoShell v0.2.0 (Phase 2 Ready)").FontSize(11).TextColor(t.TextMuted)
 	})
 }
 
-// 新建/编辑主机弹窗 (桌面对话框风格，4px 原生圆角)
+// 新建/编辑主机弹窗
 func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &v.modalOpen, func() {
 		ui.Column(c).Width(420).Background(t.Surface).Border(1, ui.Hex("#CBD5E1")).Padding(t.Space(5)).Radius(t.Radius).Gap(t.Space(3)).Children(func() {
@@ -372,40 +378,45 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, "主机别名:").FontSize(12).TextColor(t.TextMuted)
 			ui.TextInput(c, &v.formName)
 
-			// 地址与端口
-			ui.Row(c).Gap(t.Space(2)).Children(func() {
-				ui.Column(c).Grow(1).Children(func() {
-					ui.Text(c, "主机 IP / 域名:").FontSize(12).TextColor(t.TextMuted)
-					ui.TextInput(c, &v.formAddress)
-				})
-				ui.Column(c).Width(90).Children(func() {
-					ui.Text(c, "端口:").FontSize(12).TextColor(t.TextMuted)
-					ui.TextInput(c, &v.formPort)
-				})
-			})
-
-			// 用户名
-			ui.Text(c, "登录用户名:").FontSize(12).TextColor(t.TextMuted)
-			ui.TextInput(c, &v.formUsername)
-
 			// 认证方式选择
 			ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "认证方式:").FontSize(12).TextColor(t.TextMuted)
-				if ui.Button(c, "密码认证").Clicked() {
+				ui.Text(c, "连接类型:").FontSize(12).TextColor(t.TextMuted)
+				if ui.Button(c, "SSH 密码").Clicked() {
 					v.formAuthType = "password"
 				}
-				if ui.Button(c, "私钥认证").Clicked() {
+				if ui.Button(c, "SSH 私钥").Clicked() {
 					v.formAuthType = "key"
 				}
-				ui.Text(c, "(当前: "+v.formAuthType+")").FontSize(11).TextColor(t.Accent)
+				if ui.Button(c, "本地终端").Clicked() {
+					v.formAuthType = "local"
+				}
+				ui.Text(c, "("+v.formAuthType+")").FontSize(11).TextColor(t.Accent)
 			})
 
-			if v.formAuthType == "password" {
-				ui.Text(c, "密码:").FontSize(12).TextColor(t.TextMuted)
-				ui.TextInput(c, &v.formPassword)
-			} else {
-				ui.Text(c, "私钥路径 (如 ~/.ssh/id_rsa):").FontSize(12).TextColor(t.TextMuted)
-				ui.TextInput(c, &v.formKeyPath)
+			if v.formAuthType != "local" {
+				// 地址与端口
+				ui.Row(c).Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Children(func() {
+						ui.Text(c, "主机 IP / 域名:").FontSize(12).TextColor(t.TextMuted)
+						ui.TextInput(c, &v.formAddress)
+					})
+					ui.Column(c).Width(90).Children(func() {
+						ui.Text(c, "端口:").FontSize(12).TextColor(t.TextMuted)
+						ui.TextInput(c, &v.formPort)
+					})
+				})
+
+				// 用户名
+				ui.Text(c, "登录用户名:").FontSize(12).TextColor(t.TextMuted)
+				ui.TextInput(c, &v.formUsername)
+
+				if v.formAuthType == "password" {
+					ui.Text(c, "密码:").FontSize(12).TextColor(t.TextMuted)
+					ui.TextInput(c, &v.formPassword)
+				} else {
+					ui.Text(c, "私钥路径 (如 ~/.ssh/id_rsa):").FontSize(12).TextColor(t.TextMuted)
+					ui.TextInput(c, &v.formKeyPath)
+				}
 			}
 
 			// 底部操作按钮
@@ -460,24 +471,35 @@ func (v *AppView) saveHostForm() {
 		v.formErrorMsg = "请输入主机显示别名"
 		return
 	}
-	if strings.TrimSpace(v.formAddress) == "" {
-		v.formErrorMsg = "请输入主机 IP 或域名"
-		return
-	}
-	port, err := strconv.Atoi(strings.TrimSpace(v.formPort))
-	if err != nil || port <= 0 {
-		v.formErrorMsg = "请输入有效端口号 (1-65535)"
-		return
+
+	authType := model.AuthType(v.formAuthType)
+	address := strings.TrimSpace(v.formAddress)
+	port := 22
+
+	if authType == model.AuthTypeLocal {
+		address = "localhost"
+		port = 0
+	} else {
+		if address == "" {
+			v.formErrorMsg = "请输入主机 IP 或域名"
+			return
+		}
+		var err error
+		port, err = strconv.Atoi(strings.TrimSpace(v.formPort))
+		if err != nil || port <= 0 {
+			v.formErrorMsg = "请输入有效端口号 (1-65535)"
+			return
+		}
 	}
 
 	h := &model.Host{
 		ID:          v.formID,
 		GroupID:     v.formGroupID,
 		Name:        strings.TrimSpace(v.formName),
-		Address:     strings.TrimSpace(v.formAddress),
+		Address:     address,
 		Port:        port,
 		Username:    strings.TrimSpace(v.formUsername),
-		AuthType:    model.AuthType(v.formAuthType),
+		AuthType:    authType,
 		Password:    v.formPassword,
 		KeyPath:     strings.TrimSpace(v.formKeyPath),
 		Description: "自建主机连接",
@@ -494,27 +516,40 @@ func (v *AppView) saveHostForm() {
 	v.modalOpen = false
 }
 
-// 在标签栏中打开主机会话
-func (v *AppView) openHostTab(h *model.Host) {
-	title := h.Name
-	for i, tab := range v.tabs {
-		if tab == title {
-			v.activeTabIndex = i
+// 打开或切换到主机的终端会话
+func (v *AppView) openHostSession(h *model.Host) {
+	for i, s := range v.sessions {
+		if s.Host.ID == h.ID {
+			v.activeTabIndex = i + 1
 			return
 		}
 	}
 
-	v.tabs = append(v.tabs, title)
-	v.activeTabIndex = len(v.tabs) - 1
+	session := NewTerminalSession(h)
+	v.sessions = append(v.sessions, session)
+	v.activeTabIndex = len(v.sessions)
+	session.Start()
 }
 
-// 关闭指定 Tab
-func (v *AppView) closeTab(index int) {
-	if index <= 0 || index >= len(v.tabs) {
+// 关闭指定会话 Tab
+func (v *AppView) closeSessionTab(tabIndex int) {
+	if tabIndex <= 0 || tabIndex > len(v.sessions) {
 		return
 	}
-	v.tabs = append(v.tabs[:index], v.tabs[index+1:]...)
-	if v.activeTabIndex >= len(v.tabs) {
-		v.activeTabIndex = len(v.tabs) - 1
+	sessionIndex := tabIndex - 1
+	session := v.sessions[sessionIndex]
+	session.Close()
+
+	v.sessions = append(v.sessions[:sessionIndex], v.sessions[sessionIndex+1:]...)
+	if v.activeTabIndex >= len(v.sessions)+1 {
+		v.activeTabIndex = len(v.sessions)
 	}
+}
+
+// 关闭所有会话
+func (v *AppView) CloseAll() {
+	for _, s := range v.sessions {
+		s.Close()
+	}
+	v.sessions = nil
 }

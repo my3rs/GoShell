@@ -140,6 +140,16 @@ func (a *App) seedDefaultData() {
 			Description: "本地测试沙箱",
 			ColorTag:    "#F59E0B", // 琥珀黄
 		})
+		a.Store.SaveHost(&model.Host{
+			GroupID:     gDev.ID,
+			Name:        "本机终端 (Local)",
+			Address:     "localhost",
+			Port:        0,
+			Username:    "local",
+			AuthType:    model.AuthTypeLocal,
+			Description: "本地 Shell 终端直接交互",
+			ColorTag:    "#059669",
+		})
 	}
 
 	_ = a.ReloadData()

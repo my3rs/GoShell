@@ -20,12 +20,19 @@ func main() {
 	appView := uiPkg.NewAppView(application)
 
 	mygo.App.WhenReady(func() {
-		mygo.NewWindow(mygo.WindowOptions{
+		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:   "GoShell",
 			Width:   1120,
 			Height:  720,
 			Content: ui.View(appView.View),
 		})
+		win.OnClosed(func() {
+			appView.CloseAll()
+		})
+	})
+
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		appView.CloseAll()
 	})
 
 	if err := mygo.App.Run(); err != nil {
