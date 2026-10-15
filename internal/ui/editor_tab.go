@@ -162,7 +162,7 @@ func (ef *EditorFile) Save() {
 }
 
 // Render 在主视窗渲染就地代码编辑器
-func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onClose func()) {
+func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 	// 捕获全局 Cmd+S / Ctrl+S 快捷键
 	if c.Shortcut(ui.Cmd, ui.KeyS) || c.Shortcut(ui.Ctrl, ui.KeyS) {
 		ef.Save()
@@ -222,19 +222,6 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onClose func()) {
 			// 保存按钮 (Cmd+S / Ctrl+S)
 			if ui.PrimaryButton(c, "保存 (Cmd+S)").Clicked() {
 				ef.Save()
-			}
-
-			// 关闭编辑器按钮 (精细 18x18 矢量 X 图标)
-			closeBtn := ui.Row(c).Width(20).Height(20).Radius(3).Center().Children(func() {
-				ui.Icon(c, IconClose).Width(11).Height(11).TextColor(t.TextMuted)
-			})
-			if closeBtn.Hovered() {
-				closeBtn.Background(ui.Hex("#E2E8F0"))
-			}
-			if closeBtn.Clicked() {
-				if onClose != nil {
-					onClose()
-				}
 			}
 		})
 

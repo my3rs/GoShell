@@ -40,7 +40,7 @@ type AppView struct {
 	// 布局尺寸
 	sidebarWidth float32
 
-	// 侧边栏当前激活 Tab: 0 = 资产节点, 1 = 远程文件
+	// 侧边栏当前激活 Tab: 0 = 主机列表, 1 = 远程文件
 	sidebarTab int
 
 	// 本机网络 IP
@@ -77,7 +77,7 @@ func NewAppView(application *app.App) *AppView {
 		formPort:     "22",
 		formUsername: "root",
 		formAuthType: "password",
-		tabs:         []WorkspaceTab{{Type: TabTypeOverview, Title: "资产概览"}},
+		tabs:         []WorkspaceTab{{Type: TabTypeOverview, Title: "概览"}},
 	}
 
 	// 默认选中第一个主机以便展示详情
@@ -264,7 +264,7 @@ func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// 辅助渲染单行主机资产项 (复刻 docker-mate 的 Sidebar.MenuButton 选中/悬浮外观)
+// 辅助渲染单行主机项 (复刻 docker-mate 的 Sidebar.MenuButton 选中/悬浮外观)
 func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 	host := h
 	isSelected := v.selectedHostID == host.ID
@@ -308,6 +308,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 顶部多标签栏 (复刻 docker-mate 的 Tabs 标签导航风格)
+		tabToClose := -1
 		ui.Row(c).Height(36).Background(ColSidebarBg).Padding(4, t.Space(2)).Gap(4).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
 			for i := range v.tabs {
 				index := i
@@ -329,7 +330,8 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					title += " ●"
 				}
 
-				ui.Row(c).Height(28).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(0, t.Space(2.5)).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+				tabItem := ui.Row(c).Height(28).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(0, t.Space(2.5)).AlignItems(ui.Center).Gap(t.Space(1.5))
+				tabItem.Children(func() {
 					switch tab.Type {
 					case TabTypeOverview:
 						ui.Icon(c, IconActivity).TextColor(textColor).Width(12).Height(12)
@@ -341,23 +343,31 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 
 					ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
 
-					// 非主概览标签提供微型矢量 X 关闭图标按钮 (非大按钮)
+					// 非主概览标签提供微型矢量 X 关闭图标按钮 (无边框，极简原生桌面质感)
 					if index > 0 {
-						closeBtn := ui.Row(c).Width(16).Height(16).Radius(2).Center().Children(func() {
-							ui.Icon(c, IconClose).Width(9).Height(9).TextColor(t.TextMuted)
-						})
+						closeBtn := ui.ButtonBase(c).Width(16).Height(16).Radius(3).Center()
+						closeIconCol := t.TextMuted
 						if closeBtn.Hovered() {
 							closeBtn.Background(ui.Hex("#E2E8F0"))
+							closeIconCol = t.Text
 						}
+						closeBtn.Children(func() {
+							ui.Icon(c, IconClose).Width(9).Height(9).TextColor(closeIconCol)
+						})
 						if closeBtn.Clicked() {
-							v.closeTab(index)
+							tabToClose = index
 						}
 					}
-				}).OnClick(func() {
-					v.activeTabIndex = index
 				})
+				if tabItem.Clicked() {
+					v.activeTabIndex = index
+				}
 			}
 		})
+
+		if tabToClose >= 0 {
+			v.closeTab(tabToClose)
+		}
 
 		// 标签视窗内容
 		if v.activeTabIndex < 0 || v.activeTabIndex >= len(v.tabs) || v.activeTabIndex == 0 {
@@ -377,9 +387,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				}
 			case TabTypeEditor:
 				if currentTab.Editor != nil {
-					currentTab.Editor.Render(c, t, func() {
-						v.closeTab(v.activeTabIndex)
-					})
+					currentTab.Editor.Render(c, t)
 				} else {
 					v.renderInspectorDashboard(c, t)
 				}
@@ -878,6 +886,6 @@ func (v *AppView) CloseAll() {
 			t.Session.Close()
 		}
 	}
-	v.tabs = []WorkspaceTab{{Type: TabTypeOverview, Title: "资产概览"}}
+	v.tabs = []WorkspaceTab{{Type: TabTypeOverview, Title: "概览"}}
 	v.activeTabIndex = 0
 }
