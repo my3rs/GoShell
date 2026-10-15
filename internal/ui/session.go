@@ -34,6 +34,7 @@ type TerminalSession struct {
 	SFTPClient  *sftpService.Client
 	TransferMgr *transfer.Manager
 	CurrentDir  string
+	PathInput   string // 路径输入栏双向绑定
 	FileList    []sftpService.FileEntry
 	FileLoading bool
 	FileError   string
@@ -58,6 +59,7 @@ func NewTerminalSession(host *model.Host) *TerminalSession {
 		Title:      host.Name,
 		StartTime:  time.Now(),
 		CurrentDir: "/",
+		PathInput:  "/",
 	}
 }
 
@@ -79,6 +81,7 @@ func (s *TerminalSession) Start() {
 			home = "/"
 		}
 		s.CurrentDir = home
+		s.PathInput = home
 
 		term, err := terminal.New(terminal.Options{
 			Theme: terminal.LightTheme(),
@@ -176,6 +179,7 @@ func (s *TerminalSession) Start() {
 		s.SFTPClient = sftpCli
 		s.TransferMgr = transMgr
 		s.CurrentDir = defaultDir
+		s.PathInput = defaultDir
 		s.Connecting = false
 		s.Connected = true
 		s.mu.Unlock()
@@ -245,8 +249,12 @@ func (s *TerminalSession) RefreshFiles() {
 
 // NavigateTo 进入指定目录
 func (s *TerminalSession) NavigateTo(targetPath string) {
+	if targetPath == "" {
+		targetPath = "/"
+	}
 	s.mu.Lock()
 	s.CurrentDir = targetPath
+	s.PathInput = targetPath
 	s.selectedPath = ""
 	s.mu.Unlock()
 	s.RefreshFiles()
@@ -261,6 +269,7 @@ func (s *TerminalSession) NavigateUp() {
 		return
 	}
 	s.CurrentDir = parent
+	s.PathInput = parent
 	s.selectedPath = ""
 	s.mu.Unlock()
 	s.RefreshFiles()
@@ -277,7 +286,7 @@ func (s *TerminalSession) DownloadEntry(entry sftpService.FileEntry) {
 	s.ShowTransfer = true
 }
 
-// DeleteEntry 删除文件
+// DeleteEntry 删除文件或空目录
 func (s *TerminalSession) DeleteEntry(entry sftpService.FileEntry) {
 	go func() {
 		if s.Host.AuthType == model.AuthTypeLocal {
@@ -328,9 +337,9 @@ func (s *TerminalSession) Close() {
 }
 
 // Render 在主工作区全高渲染终端界面（免除底部挤占，100% 满屏高度）
-func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onSwitchToFiles func()) {
+func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
-		// 1. 会话控制栏 (28px 紧凑高度)
+		// 1. 会话控制栏 (28px 紧凑高度，精简按钮)
 		vStatusColor := t.Success
 		vStatusText := "已连接"
 		if s.Connecting {
@@ -347,13 +356,6 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 
 			ui.Spacer(c)
 
-			// 快捷切换到左侧文件标签
-			if ui.Button(c, "查看左侧文件").Clicked() {
-				if onSwitchToFiles != nil {
-					onSwitchToFiles()
-				}
-			}
-
 			// 传输队列开关
 			var taskCount int
 			var taskSpeed string
@@ -368,16 +370,10 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 				s.ShowTransfer = !s.ShowTransfer
 			}
 
+			// 仅在断开时展示重新连接按钮
 			if !s.Connected && !s.Connecting {
 				if ui.Button(c, "重新连接").Clicked() {
 					s.Start()
-				}
-			}
-
-			if ui.Button(c, "关闭会话").Clicked() {
-				s.Close()
-				if onClose != nil {
-					onClose()
 				}
 			}
 		})
@@ -401,12 +397,6 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 					if ui.PrimaryButton(c, "重新连接").Clicked() {
 						s.Start()
 					}
-					if ui.Button(c, "关闭标签页").Clicked() {
-						s.Close()
-						if onClose != nil {
-							onClose()
-						}
-					}
 				})
 			})
 		} else {
@@ -424,6 +414,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 }
 
 // RenderSidebarFileExplorer 在左侧边栏渲染紧凑的文件目录浏览器
+// 支持路径输入、r/d 类型标识、双击进入目录、右键菜单
 func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(ui.Hex("#F8F9FA")).Padding(t.Space(1.5)).Gap(t.Space(1.5)).Children(func() {
 		// 当前会话主机信息栏
@@ -438,12 +429,18 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) 
 			}
 		})
 
-		// 路径导航条 (紧凑卡片)
-		ui.Row(c).Height(26).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, s.CurrentDir).FontSize(11).Bold().TextColor(t.Text)
+		// 路径输入导航栏 (支持直接键盘输入路径 + 前往跳转)
+		ui.Row(c).Height(28).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(1)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+			ui.TextInput(c, &s.PathInput).Grow(1)
+			if ui.Button(c, "前往").Clicked() {
+				target := strings.TrimSpace(s.PathInput)
+				if target != "" {
+					s.NavigateTo(target)
+				}
+			}
 		})
 
-		// 操作按钮组 (返回上级、根目录、刷新)
+		// 快捷导航按钮组 (返回上级、根目录、刷新)
 		ui.Row(c).Height(24).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c, "上级").Clicked() {
 				s.NavigateUp()
@@ -465,6 +462,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) 
 		ui.Box(c).Height(1).Background(t.Border)
 
 		// 紧凑文件列表 (滚动视图，每行 24px)
+		// 左侧用 d / r 标识目录或文件，双击目录进入，右键弹出上下文菜单
 		ui.Scroll(c).Fill().Children(func() {
 			ui.Column(c).Gap(t.Space(0.5)).Children(func() {
 				for _, entry := range s.FileList {
@@ -478,44 +476,61 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) 
 						borderCol = ui.Hex("#B8D3F7")
 					}
 
-					ui.Row(c).Height(24).Background(rowBg).Border(1, borderCol).Padding(0, t.Space(1.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-						// 目录与文件前缀标签
-						typeTag := "[文]"
+					row := ui.Row(c).Height(24).Background(rowBg).Border(1, borderCol).Padding(0, t.Space(1.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5))
+
+					// 右键菜单 (下载、删除、进入、刷新)
+					row.ContextMenu(func(m *ui.Menu) {
+						if item.IsDir {
+							if m.Item("进入目录").Chosen() {
+								s.NavigateTo(item.Path)
+							}
+						} else {
+							if m.Item("下载到本地 (~/Downloads)").Chosen() {
+								s.DownloadEntry(item)
+							}
+						}
+						m.Separator()
+						if m.Item("删除").Chosen() {
+							s.DeleteEntry(item)
+						}
+						m.Separator()
+						if m.Item("刷新列表").Chosen() {
+							s.RefreshFiles()
+						}
+					})
+
+					// 双击目录进入
+					if row.DoubleClicked() {
+						if item.IsDir {
+							s.NavigateTo(item.Path)
+						}
+					}
+
+					// 单击选中高亮
+					if row.Clicked() {
+						s.selectedPath = item.Path
+					}
+
+					row.Children(func() {
+						// 1. 左侧 d / r 标识 (d = 目录, r = 普通文件)
+						typeTag := "r"
 						typeCol := t.TextMuted
 						if item.IsDir {
-							typeTag = "[目]"
+							typeTag = "d"
 							typeCol = t.Accent
 						}
+						ui.Text(c, typeTag).FontSize(11).Bold().TextColor(typeCol).Width(12)
 
-						ui.Text(c, typeTag).FontSize(10).TextColor(typeCol)
-
-						// 文件名
+						// 2. 文件/目录名称 (不放按钮，名称占据全部空间)
 						nameElem := ui.Text(c, item.Name).FontSize(11).TextColor(t.Text).Grow(1)
 						if item.IsDir {
 							nameElem.Bold()
 						}
 
-						// 文件大小
+						// 3. 文件大小 (普通文件展示体积)
 						if !item.IsDir {
 							ui.Text(c, item.SizeHuman).FontSize(10).TextColor(t.TextMuted)
 						}
-
-						// 行内快捷操作
-						if item.IsDir {
-							if ui.Button(c, "进入").Clicked() {
-								s.NavigateTo(item.Path)
-							}
-						} else {
-							if ui.Button(c, "下载").Clicked() {
-								s.DownloadEntry(item)
-							}
-						}
-
-						if ui.Button(c, "删").Clicked() {
-							s.DeleteEntry(item)
-						}
-					}).OnClick(func() {
-						s.selectedPath = item.Path
 					})
 				}
 			})

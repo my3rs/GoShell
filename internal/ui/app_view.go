@@ -309,12 +309,15 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					borderCol = t.Border
 				}
 
-				ui.Row(c).Height(29).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(t.Space(1), t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				ui.Row(c).Height(29).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(t.Space(1), t.Space(2.5)).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 					ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
 
-					// 非主概览标签提供关闭选项
+					// 非主概览标签提供紧凑的 × 关闭图标
 					if index > 0 {
-						if ui.Button(c, "关闭").Clicked() {
+						closeBtn := ui.Row(c).Width(16).Height(16).Radius(3).Center().Children(func() {
+							ui.Text(c, "×").FontSize(12).TextColor(t.TextMuted)
+						})
+						if closeBtn.Clicked() {
 							v.closeSessionTab(index)
 						}
 					}
@@ -331,11 +334,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			sessionIndex := v.activeTabIndex - 1
 			if sessionIndex < len(v.sessions) {
 				session := v.sessions[sessionIndex]
-				session.Render(c, t, func() {
-					v.closeSessionTab(v.activeTabIndex)
-				}, func() {
-					v.sidebarTab = 1 // 切换到左侧文件标签
-				})
+				session.Render(c, t)
 			} else {
 				v.renderInspectorDashboard(c, t)
 			}
