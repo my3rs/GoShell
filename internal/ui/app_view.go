@@ -312,10 +312,10 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				ui.Row(c).Height(29).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(t.Space(1), t.Space(2.5)).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 					ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
 
-					// 非主概览标签提供紧凑的 × 关闭图标
+					// 非主概览标签提供紧凑的 X 关闭图标
 					if index > 0 {
 						closeBtn := ui.Row(c).Width(16).Height(16).Radius(3).Center().Children(func() {
-							ui.Text(c, "×").FontSize(12).TextColor(t.TextMuted)
+							ui.Icon(c, IconClose).Width(10).Height(10).TextColor(t.TextMuted)
 						})
 						if closeBtn.Clicked() {
 							v.closeSessionTab(index)
