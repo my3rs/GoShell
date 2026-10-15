@@ -140,10 +140,8 @@ func (s *TerminalSession) Start() {
 				Font: terminal.Font{
 					Family: fonts.FallbackChain,
 					Size:   13,
-					NoBold: true,
 				},
 				CopyOnSelect: terminal.CopyOnSelectClipboard,
-				MiddleClick:  terminal.MiddleClickPaste,
 				Theme:        terminal.DarkTheme(),
 				DarkTheme:    terminal.DarkTheme(),
 				OnTitle: func(title string) {
@@ -222,10 +220,8 @@ func (s *TerminalSession) Start() {
 			Font: terminal.Font{
 				Family: fonts.FallbackChain,
 				Size:   13,
-				NoBold: true,
 			},
 			CopyOnSelect: terminal.CopyOnSelectClipboard,
-			MiddleClick:  terminal.MiddleClickPaste,
 			Theme:        terminal.DarkTheme(),
 			DarkTheme:    terminal.DarkTheme(),
 			OnTitle: func(title string) {

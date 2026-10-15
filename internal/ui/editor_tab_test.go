@@ -126,23 +126,13 @@ func TestEditor_SaveShortcutByOS(t *testing.T) {
 
 func TestTerminal_OptionsConfig(t *testing.T) {
 	opts := terminal.Options{
-		Font: terminal.Font{
-			NoBold: true,
-		},
 		CopyOnSelect: terminal.CopyOnSelectClipboard,
-		MiddleClick:  terminal.MiddleClickPaste,
 		Theme:        terminal.DarkTheme(),
 		DarkTheme:    terminal.DarkTheme(),
 	}
 
-	if !opts.Font.NoBold {
-		t.Errorf("Font.NoBold = false, want true")
-	}
 	if opts.CopyOnSelect != terminal.CopyOnSelectClipboard {
 		t.Errorf("CopyOnSelect = %v, want CopyOnSelectClipboard", opts.CopyOnSelect)
-	}
-	if opts.MiddleClick != terminal.MiddleClickPaste {
-		t.Errorf("MiddleClick = %v, want MiddleClickPaste", opts.MiddleClick)
 	}
 	if opts.Theme == nil || opts.Theme.Background != terminal.DarkTheme().Background {
 		t.Errorf("Terminal theme background should be dark")

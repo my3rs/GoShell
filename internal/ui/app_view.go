@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -51,6 +52,7 @@ type AppView struct {
 	// 布局尺寸
 	sidebarWidth     float32
 	sidebarCollapsed bool
+	sidebarDragging  bool
 
 	// 侧边栏当前激活 Tab: 0 = 主机列表, 1 = 远程文件
 	sidebarTab int
@@ -133,16 +135,58 @@ func (v *AppView) View(c *ui.Context) {
 	}
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		// 1. 主体工作区（折叠时工作区 100% 铺满，展开时双栏并列可自由拖拽调节宽度）
-		if v.sidebarCollapsed {
-			v.renderWorkspace(c, t)
-		} else {
-			ui.Split(c, &v.sidebarWidth, func() {
-				v.renderSidebar(c, t)
-			}, func() {
-				v.renderWorkspace(c, t)
-			}).Grow(1)
+		// 1. 主体工作区（支持侧边栏平滑折叠/展开动画与拖拽调整宽度）
+		mainRow := ui.Row(c).Key("main_workspace_split").Grow(1).AlignItems(ui.Stretch)
+
+		targetWidth := float32(0)
+		if !v.sidebarCollapsed {
+			targetWidth = v.sidebarWidth
 		}
+
+		var currentWidth float32
+		if v.sidebarDragging {
+			currentWidth = mainRow.Jump("sidebar_w", v.sidebarWidth)
+		} else {
+			currentWidth = mainRow.AnimateWith("sidebar_w", targetWidth, 220*time.Millisecond, ui.EaseOut)
+		}
+
+		mainRow.Children(func() {
+			if currentWidth > 0.5 {
+				// 侧边栏外层裁剪容器：宽度为动态动画值 currentWidth，内部保持目标 sidebarWidth 以防挤压
+				ui.Box(c).Width(currentWidth).Shrink(0).Clip().Children(func() {
+					ui.Row(c).Width(v.sidebarWidth).AlignItems(ui.Stretch).Children(func() {
+						v.renderSidebar(c, t)
+					})
+				})
+
+				// 仅在完全展开状态下渲染可拖拽调宽手柄
+				if !v.sidebarCollapsed && currentWidth >= v.sidebarWidth-1 {
+					divider := ui.Row(c).Width(4).Cursor(ui.CursorResizeEW).Center()
+					dx, _, held := divider.Dragged()
+					v.sidebarDragging = held
+					if held {
+						newW := v.sidebarWidth + dx
+						if newW < 180 {
+							newW = 180
+						} else if newW > 500 {
+							newW = 500
+						}
+						v.sidebarWidth = newW
+						mainRow.Jump("sidebar_w", v.sidebarWidth)
+					}
+					divColor := ColSidebarBorder
+					if held || divider.Hovered() {
+						divColor = t.Accent
+					}
+					ui.Box(c).Width(1).Fill().Background(divColor)
+				}
+			}
+
+			// 右侧多标签工作区（自动撑满剩余宽度）
+			ui.Box(c).Grow(1).Shrink(1).Children(func() {
+				v.renderWorkspace(c, t)
+			})
+		})
 
 		// 2. 底部状态栏
 		v.renderStatusBar(c, t)
@@ -253,8 +297,6 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 				v.sidebarTab = 1
 			})
 		})
-
-		ui.Box(c).Height(1).Background(ColSidebarBorder)
 
 		// 3. 视窗内容分流：主机列表平铺或文件浏览
 		if v.sidebarTab == 0 {
@@ -455,23 +497,25 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	}
 
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
-		// 顶部多标签栏 (Chrome 风格：下方开放无缝衔接工作区，清晰区分连接与文件)
+		// 顶部多标签栏 (下方开放无缝衔接工作区，依靠底色自然区分)
 		tabToClose := -1
-		ui.Row(c).Height(36).Background(ColSidebarBg).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Padding(0, 8, 0, 8).AlignItems(ui.End).Gap(0).Children(func() {
-			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符
+		ui.Row(c).Height(36).Background(ColSidebarBg).Padding(0, 8, 0, 8).AlignItems(ui.End).Gap(0).Children(func() {
+			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符 (高度与 Top 与各 Tab 严格水平对齐)
 			if v.sidebarCollapsed {
-				btnExpand := ui.ButtonBase(c).Tooltip("展开侧边栏 (Cmd+B)").Width(24).Height(24).Radius(4).Center().Margin(0, 2, 6, 0)
-				expandIconCol := t.TextMuted
-				if btnExpand.Hovered() {
-					btnExpand.Background(ui.Hex("#DFE5EC"))
-					expandIconCol = t.Text
-				}
-				btnExpand.Children(func() {
-					ui.Icon(c, IconPanelLeftOpen).Width(13).Height(13).TextColor(expandIconCol)
+				ui.Row(c).Height(34).Top(1).AlignItems(ui.Center).Margin(0, 2, 0, 0).Children(func() {
+					btnExpand := ui.ButtonBase(c).Tooltip("展开侧边栏 (Cmd+B)").Width(24).Height(24).Radius(4).Center()
+					expandIconCol := t.TextMuted
+					if btnExpand.Hovered() {
+						btnExpand.Background(ui.Hex("#DFE5EC"))
+						expandIconCol = t.Text
+					}
+					btnExpand.Children(func() {
+						ui.Icon(c, IconPanelLeftOpen).Width(13).Height(13).TextColor(expandIconCol)
+					})
+					if btnExpand.Clicked() {
+						v.ToggleSidebar()
+					}
 				})
-				if btnExpand.Clicked() {
-					v.ToggleSidebar()
-				}
 
 				ui.Row(c).Width(1).Height(34).Top(1).AlignItems(ui.Center).Margin(0, 4, 0, 2).Children(func() {
 					ui.Box(c).Width(1).Height(14).Background(ui.Hex("#CBD5E1"))
@@ -526,8 +570,8 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					}
 				}
 
-				// 统一定义 Tab 外层容器：高 34px，Top(1)，居中对齐，确保激活与非激活状态尺寸及垂直基线绝对恒定
-				tabWrapper := ui.Row(c).Height(34).Top(1).AlignItems(ui.Center).Shrink(1).MaxWidth(220)
+				// 统一定义 Tab 外层容器：高 34px，Top(1)，顶部对齐，确保激活与非激活状态顶部水平线绝对一致
+				tabWrapper := ui.Row(c).Height(34).Top(1).AlignItems(ui.Start).Shrink(1).MaxWidth(220)
 				if tip != "" {
 					tabWrapper.Tooltip(tip)
 				}
@@ -544,7 +588,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 						// 左外圆角端盖 (包含左下平滑外凹圆角与左上圆角)
 						ui.Image(c, ChromeTabCapLeft).Width(4).Height(34)
 
-						// Tab 纯白主体：顶部 1px 分割线，左右舒适内边距 8px，底部内边距 1px 平衡顶部边框实现绝对垂直居中
+						// Tab 纯白主体：高 34px 贯穿底部与工作区无缝融合，顶部 1px 分割线，底部 1px 内边距平衡顶部边框使中心在 17px
 						tabBody := ui.Row(c).Height(34).AlignItems(ui.Center).Gap(t.Space(1.5)).
 							Background(t.Surface).
 							BorderWidth(1, 0, 0, 0).
@@ -558,8 +602,10 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 						// 右外圆角端盖 (包含右上圆角与右下平滑外凹圆角)
 						ui.Image(c, ChromeTabCapRight).Width(4).Height(34)
 					} else {
-						// 2. 非激活或平铺状态：hover 背景最上端与激活状态 Tab 最上端绝对对齐在同一水平线 (Top: 0, Height: 34)
-						// 左右舒适内边距 12px，与激活态 (4px端盖 + 8px主体内边距 = 12px) 严格恒定无跳动
+						// 2. 非激活或平铺状态：
+						// • 顶端与激活态绝对水平齐平 (Top: 0)
+						// • 底端高 30px (留出 4px 悬浮间距，绝不延伸触碰底端边界)
+						// • Padding(4, 12, 0, 12)：顶部 4px 补偿内边距，使内容垂直中心线精确恒定在 17px，切换 0 跳变
 						cardBg := ui.Transparent
 						if isTiled {
 							cardBg = ui.Hex("#F1F5F9")
@@ -567,10 +613,10 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 							cardBg = ui.Hex("#DFE5EC")
 						}
 
-						tabCard := ui.Row(c).Height(34).AlignItems(ui.Center).Gap(t.Space(1.5)).
+						tabCard := ui.Row(c).Height(30).AlignItems(ui.Center).Gap(t.Space(1.5)).
 							Background(cardBg).
 							Radius(6).
-							Padding(0, 12)
+							Padding(4, 12, 0, 12)
 						if isTiled {
 							tabCard.Border(1, ui.Hex("#CBD5E1"))
 						}
@@ -583,35 +629,37 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			}
 
 			// Chrome 风格的新建标签快捷按钮 (+)
-			btnNew := ui.Row(c).Width(24).Height(24).Radius(4).Center().Margin(0, 0, 4, 2)
-			if btnNew.Hovered() {
-				btnNew.Background(ui.Hex("#DFE5EC"))
-			}
-			btnNew.Children(func() {
-				ui.Icon(c, IconPlus).Width(12).Height(12).TextColor(t.TextMuted)
-			})
-			btnNew.Tooltip("新建终端或主机连接")
-			btnNew.Menu(func(m *ui.Menu) {
-				if m.Item("新建 SSH 主机...").Chosen() {
-					v.openCreateModal()
+			ui.Row(c).Height(34).Top(1).AlignItems(ui.Center).Margin(0, 0, 0, 2).Children(func() {
+				btnNew := ui.Row(c).Width(24).Height(24).Radius(4).Center()
+				if btnNew.Hovered() {
+					btnNew.Background(ui.Hex("#DFE5EC"))
 				}
-				if m.Item("打开本地终端 (新标签)").Chosen() {
-					v.openNewLocalTerminal()
-				}
-				if len(v.app.Hosts) > 0 {
-					m.Separator()
-					for _, h := range v.app.Hosts {
-						host := h
-						openCount := v.getHostSessionCount(host.ID)
-						label := "连接 " + host.Name
-						if openCount > 0 {
-							label = fmt.Sprintf("新建 %s 终端 (%d 已打开)", host.Name, openCount)
-						}
-						if m.Item(label).Chosen() {
-							v.openNewHostSession(host)
+				btnNew.Children(func() {
+					ui.Icon(c, IconPlus).Width(12).Height(12).TextColor(t.TextMuted)
+				})
+				btnNew.Tooltip("新建终端或主机连接")
+				btnNew.Menu(func(m *ui.Menu) {
+					if m.Item("新建 SSH 主机...").Chosen() {
+						v.openCreateModal()
+					}
+					if m.Item("打开本地终端 (新标签)").Chosen() {
+						v.openNewLocalTerminal()
+					}
+					if len(v.app.Hosts) > 0 {
+						m.Separator()
+						for _, h := range v.app.Hosts {
+							host := h
+							openCount := v.getHostSessionCount(host.ID)
+							label := "连接 " + host.Name
+							if openCount > 0 {
+								label = fmt.Sprintf("新建 %s 终端 (%d 已打开)", host.Name, openCount)
+							}
+							if m.Item(label).Chosen() {
+								v.openNewHostSession(host)
+							}
 						}
 					}
-				}
+				})
 			})
 
 			ui.Spacer(c)
@@ -1192,11 +1240,11 @@ func (v *AppView) renderEmptyPane(c *ui.Context, t *ui.Theme, paneIndex int) {
 	})
 }
 
-// 主机属性审查与操作面板 (精简首页：不展示看板数量与功能特性，仅保留添加主机、刷新列表与当前选中主机信息及操作)
+// 主机属性审查与操作面板 (精简首页：不展示看板数量与功能特性，仅保留添加主机与当前选中主机信息及操作)
 func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 	ui.Scroll(c).Fill().Padding(t.Space(6)).Children(func() {
 		ui.Column(c).Gap(t.Space(4)).Children(func() {
-			// 顶部功能条：仅「刷新列表」与「+ 添加 SSH 主机」
+			// 顶部功能条：仅「+ 添加 SSH 主机」
 			ui.Row(c).Height(38).AlignItems(ui.Center).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 					ui.Icon(c, IconServer).TextColor(t.Accent).Width(16).Height(16)
@@ -1205,14 +1253,9 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 
 				ui.Spacer(c)
 
-				ui.Row(c).Gap(t.Space(2)).Children(func() {
-					if ui.Button(c, "刷新列表").Clicked() {
-						_ = v.app.ReloadData()
-					}
-					if ui.PrimaryButton(c, "+ 添加 SSH 主机").Clicked() {
-						v.openCreateModal()
-					}
-				})
+				if ui.PrimaryButton(c, "+ 添加 SSH 主机").Clicked() {
+					v.openCreateModal()
+				}
 			})
 
 			// 顶栏下方的横线分隔
