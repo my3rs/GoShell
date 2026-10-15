@@ -6,7 +6,6 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -275,6 +274,29 @@ func (s *TerminalSession) NavigateUp() {
 	s.RefreshFiles()
 }
 
+// NavigateHome 进入用户家目录 (~ 或 /root / /home/user)
+func (s *TerminalSession) NavigateHome() {
+	if s.Host.AuthType == model.AuthTypeLocal {
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			s.NavigateTo(home)
+			return
+		}
+		s.NavigateTo("/")
+		return
+	}
+	// 远程 SSH / SFTP 会话
+	if s.Host.Username == "root" {
+		s.NavigateTo("/root")
+		return
+	}
+	if s.Host.Username != "" {
+		s.NavigateTo("/home/" + s.Host.Username)
+		return
+	}
+	s.NavigateTo("/")
+}
+
 // DownloadEntry 下载文件到本地 Downloads 目录
 func (s *TerminalSession) DownloadEntry(entry sftpService.FileEntry) {
 	if entry.IsDir || s.TransferMgr == nil {
@@ -336,27 +358,42 @@ func (s *TerminalSession) Close() {
 	}
 }
 
-// Render 在主工作区全高渲染终端界面（免除底部挤占，100% 满屏高度）
-func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme) {
+// Render 在主工作区全高渲染终端界面（免除底部挤占，100% 满屏高度，深度复刻 docker-mate web 终端外观）
+func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onSwitchToFiles func()) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
-		// 1. 会话控制栏 (28px 紧凑高度，精简按钮)
-		vStatusColor := t.Success
+		// 1. 会话控制栏 (复刻 docker-mate 的顶部会话状态栏，高度 36px)
+		vStatusBadgeBg := ColBadgeGreenBg
+		vStatusBadgeFg := ColBadgeGreenText
+		vStatusDotColor := t.Success
 		vStatusText := "已连接"
 		if s.Connecting {
-			vStatusColor = t.Warning
-			vStatusText = "正在连接..."
+			vStatusBadgeBg = ColBadgeAmberBg
+			vStatusBadgeFg = ColBadgeAmberText
+			vStatusDotColor = t.Warning
+			vStatusText = "连接中..."
 		} else if !s.Connected {
-			vStatusColor = t.Danger
+			vStatusBadgeBg = ui.Hex("#FEE2E2")
+			vStatusBadgeFg = t.Danger
+			vStatusDotColor = t.Danger
 			vStatusText = "已断开"
 		}
 
-		ui.Row(c).Height(28).Background(ui.Hex("#F8F9FA")).Border(1, t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Width(6).Height(6).Radius(3).Background(vStatusColor)
-			ui.Text(c, fmt.Sprintf(" %s | %s (%s:%d)", vStatusText, s.Host.Name, s.Host.Address, s.Host.Port)).FontSize(11).TextColor(t.TextMuted)
+		ui.Row(c).Height(36).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+			// 状态药丸徽章
+			ui.Row(c).Background(vStatusBadgeBg).Padding(2, 8).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+				ui.Box(c).Width(6).Height(6).Radius(3).Background(vStatusDotColor)
+				ui.Text(c, vStatusText).FontSize(10.5).Bold().TextColor(vStatusBadgeFg)
+			})
+
+			// 主机名与网络地址
+			ui.Text(c, s.Host.Name).FontSize(12).Bold().TextColor(t.Text)
+			if s.Host.AuthType != model.AuthTypeLocal {
+				ui.Text(c, fmt.Sprintf("(%s:%d)", s.Host.Address, s.Host.Port)).FontSize(11).TextColor(t.TextMuted)
+			}
 
 			ui.Spacer(c)
 
-			// 传输队列开关
+			// 传输队列开关按钮
 			var taskCount int
 			var taskSpeed string
 			if s.TransferMgr != nil {
@@ -370,19 +407,19 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme) {
 				s.ShowTransfer = !s.ShowTransfer
 			}
 
-			// 仅在断开时展示重新连接按钮
+			// 断开状态下的重连按钮
 			if !s.Connected && !s.Connecting {
-				if ui.Button(c, "重新连接").Clicked() {
+				if ui.PrimaryButton(c, "重新连接").Clicked() {
 					s.Start()
 				}
 			}
 		})
 
-		// 2. 核心工作视窗 (满高渲染 Ghostty 终端)
+		// 2. 核心工作视窗 (满高渲染 Ghostty 终端，采用暗黑主题与微细圆角边框)
 		if s.Connecting {
 			ui.Column(c).Fill().Center().Gap(t.Space(2)).Children(func() {
 				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Warning)
-				ui.Text(c, fmt.Sprintf("正在建立安全通道至 %s:%s ...", s.Host.Address, strconv.Itoa(s.Host.Port))).FontSize(13).Bold().TextColor(t.Text)
+				ui.Text(c, fmt.Sprintf("正在建立安全通道至 %s:%d ...", s.Host.Address, s.Host.Port)).FontSize(13).Bold().TextColor(t.Text)
 				ui.Text(c, "通过加密通道验证身份与分配 PTY 终端").FontSize(11).TextColor(t.TextMuted)
 				if ui.Button(c, "取消连接").Clicked() {
 					s.Close()
@@ -396,6 +433,12 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme) {
 				ui.Row(c).Gap(t.Space(2)).Children(func() {
 					if ui.PrimaryButton(c, "重新连接").Clicked() {
 						s.Start()
+					}
+					if ui.Button(c, "关闭标签页").Clicked() {
+						s.Close()
+						if onClose != nil {
+							onClose()
+						}
 					}
 				})
 			})
@@ -413,78 +456,93 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// RenderSidebarFileExplorer 在左侧边栏渲染紧凑的文件目录浏览器
-// 支持路径输入、r/d 类型标识、双击进入目录、右键菜单
-func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().Background(ui.Hex("#F8F9FA")).Padding(t.Space(1.5)).Gap(t.Space(1.5)).Children(func() {
-		// 当前会话主机信息栏
-		ui.Row(c).Height(24).Padding(0, t.Space(1.5)).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
-			ui.Text(c, " "+s.Host.Name).FontSize(11).Bold().TextColor(t.Text)
-			ui.Spacer(c)
-			if s.FileLoading {
-				ui.Text(c, "读取中...").FontSize(10).TextColor(t.Warning)
-			} else {
-				ui.Text(c, fmt.Sprintf("%d 项", len(s.FileList))).FontSize(10).TextColor(t.TextMuted)
+// RenderSidebarFileExplorer 在左侧边栏渲染现代文件目录浏览器 (左侧带 r/d 标识，支持双击目录进入/双击文件就地编辑，右键完整菜单)
+func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, onOpenFile func(entry sftpService.FileEntry)) {
+	ui.Column(c).Fill().Background(ColSidebarBg).Padding(t.Space(1.5)).Gap(t.Space(1.5)).Children(func() {
+		// 1. 路径输入框 (单层原生边框，对齐无偏移，回车即可跳转)
+		pathInput := ui.TextInput(c, &s.PathInput).Placeholder("输入路径按回车跳转...")
+		if pathInput.Submitted() {
+			target := strings.TrimSpace(s.PathInput)
+			if target != "" {
+				s.NavigateTo(target)
 			}
-		})
+		}
 
-		// 路径输入导航栏 (支持直接键盘输入路径 + 前往跳转)
-		ui.Row(c).Height(28).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(1)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-			ui.TextInput(c, &s.PathInput).Grow(1)
-			if ui.Button(c, "前往").Clicked() {
-				target := strings.TrimSpace(s.PathInput)
-				if target != "" {
-					s.NavigateTo(target)
-				}
-			}
-		})
-
-		// 快捷导航按钮组 (返回上级、根目录、刷新)
-		ui.Row(c).Height(24).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-			if ui.Button(c, "上级").Clicked() {
+		// 2. 快捷导航图标按钮组 (4 个图标按钮：返回上级、根目录、家目录、刷新，hover 时显示文字)
+		ui.Row(c).Height(26).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+			// 返回上级
+			btnUp := ui.Button(c, "").Tooltip("返回上级").Grow(1).Height(26).Center()
+			btnUp.Children(func() {
+				ui.Icon(c, IconArrowUp).Width(13).Height(13)
+			})
+			if btnUp.Clicked() {
 				s.NavigateUp()
 			}
-			if ui.Button(c, "根目录 /").Clicked() {
+
+			// 根目录 (/)
+			btnRoot := ui.Button(c, "").Tooltip("根目录 (/)").Grow(1).Height(26).Center()
+			btnRoot.Children(func() {
+				ui.Icon(c, IconHardDrive).Width(13).Height(13)
+			})
+			if btnRoot.Clicked() {
 				s.NavigateTo("/")
 			}
-			if ui.Button(c, "刷新").Clicked() {
+
+			// 家目录 (~)
+			btnHome := ui.Button(c, "").Tooltip("家目录 (~)").Grow(1).Height(26).Center()
+			btnHome.Children(func() {
+				ui.Icon(c, IconHome).Width(13).Height(13)
+			})
+			if btnHome.Clicked() {
+				s.NavigateHome()
+			}
+
+			// 刷新
+			btnRefresh := ui.Button(c, "").Tooltip("刷新列表").Grow(1).Height(26).Center()
+			btnRefresh.Children(func() {
+				ui.Icon(c, IconRefresh).Width(13).Height(13)
+			})
+			if btnRefresh.Clicked() {
 				s.RefreshFiles()
 			}
 		})
 
 		if s.FileError != "" {
-			ui.Row(c).Background(ui.Hex("#FEE2E2")).Padding(t.Space(1), t.Space(2)).Radius(t.Radius).Children(func() {
-				ui.Text(c, "错误: "+s.FileError).FontSize(10).TextColor(t.Danger)
+			ui.Row(c).Background(ui.Hex("#FEE2E2")).Border(1, ui.Hex("#FCA5A5")).Padding(t.Space(1), t.Space(2)).Radius(t.Radius).Children(func() {
+				ui.Text(c, "错误: "+s.FileError).FontSize(10.5).TextColor(t.Danger)
 			})
 		}
 
-		ui.Box(c).Height(1).Background(t.Border)
+		ui.Box(c).Height(1).Background(ColSidebarBorder)
 
-		// 紧凑文件列表 (滚动视图，每行 24px)
-		// 左侧用 d / r 标识目录或文件，双击目录进入，右键弹出上下文菜单
+		// 紧凑文件列表 (滚动视图，每行 26px，使用左侧 r/d 语义标记，右键操作菜单)
 		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).Gap(t.Space(0.5)).Children(func() {
+			ui.Column(c).Gap(1).Children(func() {
 				for _, entry := range s.FileList {
 					item := entry
 					isSel := s.selectedPath == item.Path
 
-					rowBg := ui.Hex("#F8F9FA")
-					borderCol := ui.Hex("#F8F9FA")
+					rowBg := ui.Transparent
+					borderCol := ui.Transparent
 					if isSel {
-						rowBg = ui.Hex("#EBF1FA")
-						borderCol = ui.Hex("#B8D3F7")
+						rowBg = ColSidebarActive
+						borderCol = ui.Hex("#B8C8D8")
 					}
 
-					row := ui.Row(c).Height(24).Background(rowBg).Border(1, borderCol).Padding(0, t.Space(1.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5))
+					row := ui.Row(c).Height(26).Background(rowBg).Border(1, borderCol).Padding(0, t.Space(1.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5))
 
-					// 右键菜单 (下载、删除、进入、刷新)
+					// 右键操作菜单（涵盖删除、编辑、下载等）
 					row.ContextMenu(func(m *ui.Menu) {
 						if item.IsDir {
 							if m.Item("进入目录").Chosen() {
 								s.NavigateTo(item.Path)
 							}
 						} else {
+							if m.Item("编辑文件").Chosen() {
+								if onOpenFile != nil {
+									onOpenFile(item)
+								}
+							}
 							if m.Item("下载到本地 (~/Downloads)").Chosen() {
 								s.DownloadEntry(item)
 							}
@@ -499,35 +557,40 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) 
 						}
 					})
 
-					// 双击目录进入
+					// 双击进入目录或就地编辑文件
 					if row.DoubleClicked() {
 						if item.IsDir {
 							s.NavigateTo(item.Path)
+						} else {
+							if onOpenFile != nil {
+								onOpenFile(item)
+							}
 						}
 					}
 
-					// 单击选中高亮
 					if row.Clicked() {
 						s.selectedPath = item.Path
 					}
 
 					row.Children(func() {
-						// 1. 左侧 d / r 标识 (d = 目录, r = 普通文件)
-						typeTag := "r"
-						typeCol := t.TextMuted
+						// 1. 文件左侧用 r、d 标识是文件还是目录（d 为目录采用主题强调色，r 为常规文件采用静音色）
 						if item.IsDir {
-							typeTag = "d"
-							typeCol = t.Accent
+							ui.Row(c).Width(16).Height(16).Radius(2).Background(ui.Hex("#EFF6FF")).Center().Children(func() {
+								ui.Text(c, "d").FontSize(10.5).Bold().TextColor(t.Accent)
+							})
+						} else {
+							ui.Row(c).Width(16).Height(16).Radius(2).Background(ui.Hex("#F1F5F9")).Center().Children(func() {
+								ui.Text(c, "r").FontSize(10.5).TextColor(t.TextMuted)
+							})
 						}
-						ui.Text(c, typeTag).FontSize(11).Bold().TextColor(typeCol).Width(12)
 
-						// 2. 文件/目录名称 (不放按钮，名称占据全部空间)
+						// 2. 文件/目录名称
 						nameElem := ui.Text(c, item.Name).FontSize(11).TextColor(t.Text).Grow(1)
 						if item.IsDir {
 							nameElem.Bold()
 						}
 
-						// 3. 文件大小 (普通文件展示体积)
+						// 3. 文件大小 (右侧只显示大小，无进入/删除等按钮)
 						if !item.IsDir {
 							ui.Text(c, item.SizeHuman).FontSize(10).TextColor(t.TextMuted)
 						}
@@ -538,14 +601,15 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) 
 	})
 }
 
-// 渲染传输队列抽屉 (底部浮动展示)
+// 渲染传输队列抽屉 (底部浮动展示，复刻 docker-mate 的 Card / Table 风格)
 func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 	tasks := s.TransferMgr.GetTasks()
 
-	ui.Column(c).Height(150).Background(ui.Hex("#FAFAFC")).Border(1, t.Border).Padding(t.Space(2), t.Space(3)).Gap(t.Space(1.5)).Children(func() {
+	ui.Column(c).Height(150).Background(t.Surface).Border(1, t.Border).Padding(t.Space(2), t.Space(3)).Gap(t.Space(1.5)).Children(func() {
 		// 抽屉头部
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, fmt.Sprintf("后台传输队列 (共 %d 项)", len(tasks))).FontSize(12).Bold().TextColor(t.Text)
+			ui.Icon(c, IconHardDrive).TextColor(t.Accent).Width(14).Height(14)
+			ui.Text(c, fmt.Sprintf(" 后台传输队列 (共 %d 项)", len(tasks))).FontSize(12).Bold().TextColor(t.Text)
 			ui.Spacer(c)
 			if ui.Button(c, "隐藏抽屉").Clicked() {
 				s.ShowTransfer = false
@@ -556,15 +620,26 @@ func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 
 		// 任务列表
 		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).Gap(t.Space(1.5)).Children(func() {
+			ui.Column(c).Gap(t.Space(1)).Children(func() {
 				if len(tasks) == 0 {
 					ui.Text(c, "暂无进行中的文件传输任务").FontSize(11).TextColor(t.TextMuted)
 				}
 
 				for _, task := range tasks {
 					item := task
-					ui.Row(c).Height(24).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-						ui.Text(c, string(item.Type)).FontSize(11).Bold().TextColor(t.Accent).Width(36)
+					typeBg := ColBadgeBlueBg
+					typeFg := ColBadgeBlueText
+					if item.Type == transfer.TaskTypeDownload {
+						typeBg = ColBadgePurpleBg
+						typeFg = ColBadgePurpleText
+					}
+
+					ui.Row(c).Height(26).Background(ui.Hex("#FAFBFC")).Border(1, t.Border).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						// 传输类型药丸
+						ui.Row(c).Background(typeBg).Padding(1, 6).Radius(3).Children(func() {
+							ui.Text(c, string(item.Type)).FontSize(10).Bold().TextColor(typeFg)
+						})
+
 						ui.Text(c, item.FileName).FontSize(11).Bold().TextColor(t.Text).Width(180)
 
 						progressText := fmt.Sprintf("%.1f%% (%s)", item.Percent, item.SpeedHuman)
@@ -575,7 +650,7 @@ func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 						} else if item.Status == transfer.StatusCanceled {
 							progressText = "已取消"
 						}
-						ui.Text(c, progressText).FontSize(11).TextColor(t.TextMuted).Width(160)
+						ui.Text(c, progressText).FontSize(10.5).TextColor(t.TextMuted).Width(160)
 
 						ui.Spacer(c)
 
@@ -590,3 +665,4 @@ func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 		})
 	})
 }
+

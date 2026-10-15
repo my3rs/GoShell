@@ -1,0 +1,7 @@
+{
+  "name": "GoShell",
+  "version": "0.3.0",
+  "main": "./cmd/goshell",
+  "icon": "assets/brand/app-icon.png",
+  "out": "bin"
+}

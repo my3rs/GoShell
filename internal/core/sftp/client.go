@@ -139,6 +139,51 @@ func (c *Client) CreateFile(remotePath string) (io.WriteCloser, error) {
 	return c.sftpClient.Create(remotePath)
 }
 
+// ReadFile 读取指定远程文件的全部字节数据（限制最大读取大小，防止超大文件耗尽内存）
+func (c *Client) ReadFile(remotePath string, maxBytes int64) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errors.New("SFTP 连接已关闭")
+	}
+
+	f, err := c.sftpClient.Open(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("打开远程文件失败: %w", err)
+	}
+	defer f.Close()
+
+	r := io.LimitReader(f, maxBytes+1)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("读取远程文件内容失败: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("文件大小超过编辑上限 (最大允许 %d MB)", maxBytes/(1024*1024))
+	}
+	return data, nil
+}
+
+// WriteFile 将字节数据全量覆盖写入指定远程文件
+func (c *Client) WriteFile(remotePath string, data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("SFTP 连接已关闭")
+	}
+
+	f, err := c.sftpClient.Create(remotePath)
+	if err != nil {
+		return fmt.Errorf("创建远程文件失败: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("写入远程文件失败: %w", err)
+	}
+	return nil
+}
+
 // Remove 删除远程文件
 func (c *Client) Remove(remotePath string) error {
 	c.mu.Lock()
