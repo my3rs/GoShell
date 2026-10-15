@@ -1,0 +1,16 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.dylib
+
+# Local data & temp
+*.db
+*.db-wal
+*.db-shm
+master.key
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
