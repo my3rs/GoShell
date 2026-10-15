@@ -86,7 +86,7 @@ func TestStorage_GroupAndHostCRUD(t *testing.T) {
 		t.Fatalf("expected 1 host in list, got %d", len(list))
 	}
 
-	// 6. 测试删除
+	// 6. 测试删除普通主机
 	err = store.DeleteHost(host.ID)
 	if err != nil {
 		t.Fatalf("failed to delete host: %v", err)
@@ -95,6 +95,26 @@ func TestStorage_GroupAndHostCRUD(t *testing.T) {
 	listAfter, err := store.ListHosts()
 	if err != nil || len(listAfter) != 0 {
 		t.Fatalf("expected 0 hosts after deletion, got %d", len(listAfter))
+	}
+
+	// 7. 测试本地终端保护：不可删除
+	localHost := &model.Host{
+		GroupID:  grp.ID,
+		Name:     "本地终端 (Local)",
+		Address:  "localhost",
+		AuthType: model.AuthTypeLocal,
+	}
+	if err := store.SaveHost(localHost); err != nil {
+		t.Fatalf("failed to save local host: %v", err)
+	}
+	err = store.DeleteHost(localHost.ID)
+	if err == nil {
+		t.Fatalf("expected error when deleting local host, got nil")
+	}
+	// 验证本地终端依然存在
+	listLocal, err := store.ListHosts()
+	if err != nil || len(listLocal) != 1 {
+		t.Fatalf("expected 1 host remaining (local terminal protected), got %d", len(listLocal))
 	}
 }
 

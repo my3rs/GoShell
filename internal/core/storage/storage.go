@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -275,7 +276,12 @@ func (s *Storage) ListHosts() ([]*model.Host, error) {
 }
 
 func (s *Storage) DeleteHost(id string) error {
-	_, err := s.db.Exec(`DELETE FROM hosts WHERE id = ?`, id)
+	var authType string
+	err := s.db.QueryRow(`SELECT auth_type FROM hosts WHERE id = ?`, id).Scan(&authType)
+	if err == nil && authType == string(model.AuthTypeLocal) {
+		return errors.New("本地终端受系统保护，不可删除")
+	}
+	_, err = s.db.Exec(`DELETE FROM hosts WHERE id = ?`, id)
 	return err
 }
 

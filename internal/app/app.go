@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"goshell/internal/core/model"
@@ -73,7 +74,7 @@ func New() (*App, error) {
 	return a, nil
 }
 
-// ReloadData 从数据库重新载入主机与分组
+// ReloadData 从数据库重新载入主机与分组，保证本地终端置顶
 func (a *App) ReloadData() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -88,6 +89,17 @@ func (a *App) ReloadData() error {
 	if err != nil {
 		return err
 	}
+
+	// 本地终端置顶排序，其余主机保持相对次序
+	sort.SliceStable(hosts, func(i, j int) bool {
+		if hosts[i].AuthType == model.AuthTypeLocal && hosts[j].AuthType != model.AuthTypeLocal {
+			return true
+		}
+		if hosts[i].AuthType != model.AuthTypeLocal && hosts[j].AuthType == model.AuthTypeLocal {
+			return false
+		}
+		return false
+	})
 	a.Hosts = hosts
 
 	return nil
@@ -101,58 +113,24 @@ func (a *App) Close() error {
 	return nil
 }
 
+// seedDefaultData 首次安装软件时仅初始化默认分组与本机终端，不包含任何测试 SSH 连接
 func (a *App) seedDefaultData() {
-	gProd, _ := a.Store.CreateGroup("核心生产集群", "", 1)
-	gDev, _ := a.Store.CreateGroup("开发与测试环境", "", 2)
-
-	if gProd != nil {
-		a.Store.SaveHost(&model.Host{
-			GroupID:     gProd.ID,
-			Name:        "prod-api-01",
-			Address:     "192.168.1.101",
-			Port:        22,
-			Username:    "root",
-			AuthType:    model.AuthTypePassword,
-			Password:    "demo-password",
-			Description: "API 生产网关集群 1 号机",
-			ColorTag:    "#10B981", // 绿色
-		})
-		a.Store.SaveHost(&model.Host{
-			GroupID:     gProd.ID,
-			Name:        "prod-db-01",
-			Address:     "192.168.1.102",
-			Port:        22,
-			Username:    "postgres",
-			AuthType:    model.AuthTypeKeyFile,
-			KeyPath:     "~/.ssh/id_rsa",
-			Description: "PostgreSQL 主库节点",
-			ColorTag:    "#6366F1", // 靛蓝
-		})
+	gDefault, _ := a.Store.CreateGroup("默认", "", 1)
+	var groupID string
+	if gDefault != nil {
+		groupID = gDefault.ID
 	}
 
-	if gDev != nil {
-		a.Store.SaveHost(&model.Host{
-			GroupID:     gDev.ID,
-			Name:        "dev-sandbox",
-			Address:     "127.0.0.1",
-			Port:        2222,
-			Username:    "developer",
-			AuthType:    model.AuthTypePassword,
-			Password:    "developer",
-			Description: "本地测试沙箱",
-			ColorTag:    "#F59E0B", // 琥珀黄
-		})
-		a.Store.SaveHost(&model.Host{
-			GroupID:     gDev.ID,
-			Name:        "本机终端 (Local)",
-			Address:     "localhost",
-			Port:        0,
-			Username:    "local",
-			AuthType:    model.AuthTypeLocal,
-			Description: "本地 Shell 终端直接交互",
-			ColorTag:    "#059669",
-		})
-	}
+	a.Store.SaveHost(&model.Host{
+		GroupID:     groupID,
+		Name:        "本机终端 (Local)",
+		Address:     "localhost",
+		Port:        0,
+		Username:    "local",
+		AuthType:    model.AuthTypeLocal,
+		Description: "本地 Shell 终端直接交互",
+		ColorTag:    "#059669",
+	})
 
 	_ = a.ReloadData()
 }
@@ -166,13 +144,7 @@ func (a *App) ensureLocalHost() {
 	}
 
 	var targetGroupID string
-	for _, g := range a.Groups {
-		if g.Name == "开发与测试环境" {
-			targetGroupID = g.ID
-			break
-		}
-	}
-	if targetGroupID == "" && len(a.Groups) > 0 {
+	if len(a.Groups) > 0 {
 		targetGroupID = a.Groups[0].ID
 	}
 
