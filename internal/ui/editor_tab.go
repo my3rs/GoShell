@@ -196,12 +196,6 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 				})
 			}
 
-			// 语法类型徽章
-			if ef.Language != "" {
-				ui.Row(c).Background(ColBadgeGrayBg).Padding(1, 6).Radius(t.Radius).Children(func() {
-					ui.Text(c, ef.Language).FontSize(10).Bold().TextColor(ColBadgeGrayText)
-				})
-			}
 
 			ui.Spacer(c)
 
