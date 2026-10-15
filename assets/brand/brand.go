@@ -3,7 +3,7 @@ package brand
 
 import _ "embed"
 
-// LogoSVG is the blue vector mark for light application surfaces.
+// LogoSVG is the blue rectangular GO terminal mark for light surfaces.
 //
 //go:embed logo.svg
 var LogoSVG []byte
