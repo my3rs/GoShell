@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -213,8 +214,8 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 				ef.Reload()
 			}
 
-			// 保存按钮 (Cmd+S / Ctrl+S)
-			if ui.PrimaryButton(c, "保存 (Cmd+S)").Clicked() {
+			// 保存按钮 (针对 macOS 和 Windows 显示对应快捷键提示)
+			if ui.PrimaryButton(c, SaveButtonLabel()).Tooltip("保存 (" + SaveShortcutText() + ")").Clicked() {
 				ef.Save()
 			}
 		})
@@ -273,3 +274,27 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 		})
 	})
 }
+
+// SaveShortcutText 返回当前操作系统对应的保存快捷键提示（macOS 为 Cmd+S，Windows 及其他系统为 Ctrl+S）
+func SaveShortcutText() string {
+	return SaveShortcutTextForOS(runtime.GOOS)
+}
+
+// SaveShortcutTextForOS 根据操作系统标识返回保存快捷键提示
+func SaveShortcutTextForOS(goos string) string {
+	if goos == "darwin" {
+		return "Cmd+S"
+	}
+	return "Ctrl+S"
+}
+
+// SaveButtonLabel 返回针对当前操作系统定制的保存按钮文案
+func SaveButtonLabel() string {
+	return SaveButtonLabelForOS(runtime.GOOS)
+}
+
+// SaveButtonLabelForOS 根据操作系统标识返回保存按钮文案
+func SaveButtonLabelForOS(goos string) string {
+	return fmt.Sprintf("保存 (%s)", SaveShortcutTextForOS(goos))
+}
+
