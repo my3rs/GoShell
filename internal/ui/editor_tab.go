@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
+	"goshell/assets/fonts"
 	"goshell/internal/core/model"
 	sftpService "goshell/internal/core/sftp"
 )
@@ -100,6 +101,7 @@ func (ef *EditorFile) LoadAsync() {
 
 		st := &editor.State{
 			Buffer:      buf,
+			Font:        ui.Font{Family: fonts.FallbackChain, Size: 13},
 			LineNumbers: editor.LineNumbersOn, // 开启行号显示
 		}
 
@@ -163,15 +165,19 @@ func (ef *EditorFile) Save() {
 }
 
 // Render 在主视窗渲染就地代码编辑器
-func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
+func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 	// 捕获全局 Cmd+S / Ctrl+S 快捷键
 	if c.Shortcut(ui.Cmd, ui.KeyS) || c.Shortcut(ui.Ctrl, ui.KeyS) {
 		ef.Save()
 	}
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		// 1. 顶部编辑器工具栏 (高度 38px，浅色细边框)
-		ui.Row(c).Height(38).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		// 1. 顶部编辑器工具栏 (高度 38px，浅色细底边框)
+		topBar := ui.Row(c).Height(38).Background(t.Surface).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2))
+		if topBar.Clicked() && onFocus != nil {
+			onFocus()
+		}
+		topBar.Children(func() {
 			// 文件图标
 			ui.Icon(c, IconFile).TextColor(t.Accent).Width(14).Height(14)
 
@@ -224,8 +230,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 		if ef.Loading {
 			ui.Column(c).Grow(1).Center().Gap(t.Space(2)).Children(func() {
 				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Accent)
-				ui.Text(c, fmt.Sprintf("正在从服务器读取文件: %s", ef.Path)).FontSize(13).Bold().TextColor(t.Text)
-				ui.Text(c, "通过加密通道获取文件流并初始化代码高亮引擎...").FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, fmt.Sprintf("正在读取文件: %s ...", ef.Path)).FontSize(13).Bold().TextColor(t.Text)
 			})
 		} else if ef.LoadErr != "" {
 			ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Children(func() {
@@ -241,17 +246,22 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 				ui.Icon(c, IconFile).TextColor(t.TextMuted).Width(36).Height(36)
 				ui.Text(c, "该文件为二进制格式，不支持在线代码就地编辑").FontSize(15).Bold().TextColor(t.Text)
 				ui.Text(c, "在线编辑器专为 Shell 脚本、配置文件、Python、Go、JSON、YAML、SQL 等文本文件设计。").FontSize(12).TextColor(t.TextMuted)
-				if ui.PrimaryButton(c, "下载到本地 (~/Downloads)").Clicked() {
-					ef.Session.DownloadEntry(sftpService.FileEntry{
-						Name: ef.Name,
-						Path: ef.Path,
-						Size: ef.Size,
-					})
+				if ef.Session != nil && ef.Session.ShouldShowTransferQueue() {
+					if ui.PrimaryButton(c, "下载到本地 (~/Downloads)").Clicked() {
+						ef.Session.DownloadEntry(sftpService.FileEntry{
+							Name: ef.Name,
+							Path: ef.Path,
+							Size: ef.Size,
+						})
+					}
 				}
 			})
 		} else if ef.State != nil {
 			// MyGo GPU 自绘代码编辑器：行号由 LineNumbersOn 驱动，高亮由 Buffer 语法与主题驱动
-			editor.View(c, ef.State).Grow(1).FillWidth().AutoFocus()
+			edElem := editor.View(c, ef.State).Grow(1).FillWidth()
+			if edElem.Focused() && onFocus != nil {
+				onFocus()
+			}
 		}
 
 		// 3. 底部状态栏 (高度 24px)

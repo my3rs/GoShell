@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/google/uuid"
 
+	"goshell/assets/fonts"
 	"goshell/internal/core/model"
 	sftpService "goshell/internal/core/sftp"
 	sshClient "goshell/internal/core/ssh"
@@ -41,6 +43,7 @@ type TerminalSession struct {
 	// UI 交互控制
 	ShowTransfer bool
 	selectedPath string
+	ShowHidden   bool // 是否在左侧文件列表中显示隐藏文件 (以 . 开头)
 
 	Connecting bool
 	Connected  bool
@@ -51,6 +54,33 @@ type TerminalSession struct {
 
 	// 节点专属配色分配索引
 	ColorIndex int
+
+	// UI 界面重绘通知回调
+	OnUpdate func()
+}
+
+// notifyUpdate 通知主界面重新绘制（无锁安全调用）
+func (s *TerminalSession) notifyUpdate() {
+	if s == nil {
+		return
+	}
+	if s.OnUpdate != nil {
+		s.OnUpdate()
+	}
+}
+
+// VisibleFiles 返回根据 ShowHidden 设置过滤后的文件列表
+func (s *TerminalSession) VisibleFiles() []sftpService.FileEntry {
+	if s.ShowHidden {
+		return s.FileList
+	}
+	filtered := make([]sftpService.FileEntry, 0, len(s.FileList))
+	for _, f := range s.FileList {
+		if !strings.HasPrefix(f.Name, ".") {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
 }
 
 // HostColor 返回当前会话节点的专属配色方案
@@ -87,45 +117,80 @@ func (s *TerminalSession) Start() {
 	s.Connecting = true
 	s.ErrorMsg = ""
 	s.mu.Unlock()
+	s.notifyUpdate()
+
+	_ = fonts.Register()
 
 	// 1. 本地 Shell 与本地文件系统
 	if s.Host.AuthType == model.AuthTypeLocal {
 		home, _ := os.UserHomeDir()
 		if home == "" {
-			home = "/"
+			if runtime.GOOS == "windows" {
+				home = "C:\\"
+			} else {
+				home = "/"
+			}
 		}
 		s.CurrentDir = home
 		s.PathInput = home
 
-		term, err := terminal.New(terminal.Options{
-			Theme: terminal.LightTheme(),
-			OnTitle: func(title string) {
-				if title != "" {
-					s.Title = title
-				}
-			},
-			OnExit: func(code int) {
+		go func() {
+			term, err := terminal.New(terminal.Options{
+				Dir: home,
+				Font: terminal.Font{
+					Family: fonts.FallbackChain,
+					Size:   13,
+					NoBold: true,
+				},
+				CopyOnSelect: terminal.CopyOnSelectClipboard,
+				MiddleClick:  terminal.MiddleClickPaste,
+				Theme:        terminal.DarkTheme(),
+				DarkTheme:    terminal.DarkTheme(),
+				OnTitle: func(title string) {
+					if title != "" {
+						s.mu.Lock()
+						s.Title = title
+						s.mu.Unlock()
+						s.notifyUpdate()
+					}
+				},
+				OnExit: func(code int) {
+					s.mu.Lock()
+					s.Connected = false
+					exitMsg := fmt.Sprintf("本地终端已退出 (退出码: %d)", code)
+					if code == -1 && s.Term != nil {
+						if termText := strings.TrimSpace(s.Term.Text()); termText != "" {
+							exitMsg = fmt.Sprintf("启动终端失败: %s", termText)
+						}
+					}
+					s.ErrorMsg = exitMsg
+					s.mu.Unlock()
+					s.notifyUpdate()
+				},
+			})
+			if err != nil {
 				s.mu.Lock()
-				s.Connected = false
-				s.ErrorMsg = fmt.Sprintf("本地终端已退出 (退出码: %d)", code)
+				s.Connecting = false
+				s.ErrorMsg = fmt.Sprintf("启动终端引擎失败: %v", err)
 				s.mu.Unlock()
-			},
-		})
-		if err != nil {
+				s.notifyUpdate()
+				return
+			}
+
 			s.mu.Lock()
+			if !s.Connecting {
+				s.mu.Unlock()
+				_ = term.Close()
+				return
+			}
+			s.Term = term
 			s.Connecting = false
-			s.ErrorMsg = fmt.Sprintf("启动终端引擎失败: %v", err)
+			s.Connected = true
 			s.mu.Unlock()
-			return
-		}
+			s.notifyUpdate()
 
-		s.mu.Lock()
-		s.Term = term
-		s.Connecting = false
-		s.Connected = true
-		s.mu.Unlock()
-
-		s.RefreshFiles()
+			s.RefreshFiles()
+		}()
 		return
 	}
 
@@ -137,6 +202,7 @@ func (s *TerminalSession) Start() {
 			s.Connecting = false
 			s.ErrorMsg = fmt.Sprintf("SSH 连接失败: %v", err)
 			s.mu.Unlock()
+			s.notifyUpdate()
 			return
 		}
 
@@ -147,15 +213,27 @@ func (s *TerminalSession) Start() {
 			s.Connecting = false
 			s.ErrorMsg = fmt.Sprintf("申请 PTY 终端通道失败: %v", err)
 			s.mu.Unlock()
+			s.notifyUpdate()
 			return
 		}
 
 		term, err := terminal.New(terminal.Options{
-			Conn:  termConn,
-			Theme: terminal.LightTheme(),
+			Conn: termConn,
+			Font: terminal.Font{
+				Family: fonts.FallbackChain,
+				Size:   13,
+				NoBold: true,
+			},
+			CopyOnSelect: terminal.CopyOnSelectClipboard,
+			MiddleClick:  terminal.MiddleClickPaste,
+			Theme:        terminal.DarkTheme(),
+			DarkTheme:    terminal.DarkTheme(),
 			OnTitle: func(title string) {
 				if title != "" {
+					s.mu.Lock()
 					s.Title = title
+					s.mu.Unlock()
+					s.notifyUpdate()
 				}
 			},
 			OnExit: func(code int) {
@@ -163,6 +241,7 @@ func (s *TerminalSession) Start() {
 				s.Connected = false
 				s.ErrorMsg = fmt.Sprintf("远程连接已关闭 (退出码: %d)", code)
 				s.mu.Unlock()
+				s.notifyUpdate()
 			},
 		})
 		if err != nil {
@@ -172,6 +251,7 @@ func (s *TerminalSession) Start() {
 			s.Connecting = false
 			s.ErrorMsg = fmt.Sprintf("初始化终端引擎失败: %v", err)
 			s.mu.Unlock()
+			s.notifyUpdate()
 			return
 		}
 
@@ -187,6 +267,16 @@ func (s *TerminalSession) Start() {
 		}
 
 		s.mu.Lock()
+		if !s.Connecting {
+			s.mu.Unlock()
+			_ = client.Close()
+			_ = termConn.Close()
+			_ = term.Close()
+			if sftpCli != nil {
+				_ = sftpCli.Close()
+			}
+			return
+		}
 		s.Client = client
 		s.TermConn = termConn
 		s.Term = term
@@ -197,6 +287,7 @@ func (s *TerminalSession) Start() {
 		s.Connecting = false
 		s.Connected = true
 		s.mu.Unlock()
+		s.notifyUpdate()
 
 		s.RefreshFiles()
 	}()
@@ -251,13 +342,14 @@ func (s *TerminalSession) RefreshFiles() {
 		}
 
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		s.FileLoading = false
 		if err != nil {
 			s.FileError = err.Error()
 		} else {
 			s.FileList = entries
 		}
+		s.mu.Unlock()
+		s.notifyUpdate()
 	}()
 }
 
@@ -277,7 +369,12 @@ func (s *TerminalSession) NavigateTo(targetPath string) {
 // NavigateUp 返回上一级目录
 func (s *TerminalSession) NavigateUp() {
 	s.mu.Lock()
-	parent := path.Dir(s.CurrentDir)
+	var parent string
+	if s.Host.AuthType == model.AuthTypeLocal {
+		parent = filepath.Dir(s.CurrentDir)
+	} else {
+		parent = path.Dir(s.CurrentDir)
+	}
 	if parent == s.CurrentDir {
 		s.mu.Unlock()
 		return
@@ -297,7 +394,11 @@ func (s *TerminalSession) NavigateHome() {
 			s.NavigateTo(home)
 			return
 		}
-		s.NavigateTo("/")
+		if runtime.GOOS == "windows" {
+			s.NavigateTo("C:\\")
+		} else {
+			s.NavigateTo("/")
+		}
 		return
 	}
 	// 远程 SSH / SFTP 会话
@@ -343,13 +444,12 @@ func (s *TerminalSession) DeleteEntry(entry sftpService.FileEntry) {
 	}()
 }
 
-// Close 关闭会话所有底层资源
-func (s *TerminalSession) Close() {
+// Disconnect 主动断开当前终端连接通道，但保留该会话 Tab 供随时「重新连接」
+func (s *TerminalSession) Disconnect() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.Connected = false
 	s.Connecting = false
+	s.ErrorMsg = "连接已主动断开"
 
 	if s.TransferMgr != nil {
 		s.TransferMgr.Close()
@@ -371,10 +471,23 @@ func (s *TerminalSession) Close() {
 		_ = s.Client.Close()
 		s.Client = nil
 	}
+	s.mu.Unlock()
+
+	s.notifyUpdate()
+}
+
+// Close 关闭会话所有底层资源
+func (s *TerminalSession) Close() {
+	s.Disconnect()
+}
+
+// ShouldShowTransferQueue 返回当前会话是否需要展示传输队列按钮（本地终端无需展示）
+func (s *TerminalSession) ShouldShowTransferQueue() bool {
+	return s.Host != nil && s.Host.AuthType != model.AuthTypeLocal
 }
 
 // Render 在主工作区全高渲染终端界面（免除底部挤占，100% 满屏高度，深度复刻 docker-mate web 终端外观）
-func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onSwitchToFiles func()) {
+func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onSwitchToFiles func(), onFocus func()) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 1. 会话控制栏 (复刻 docker-mate 的顶部会话状态栏，高度 36px)
 		vStatusBadgeBg := ColBadgeGreenBg
@@ -393,7 +506,11 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 			vStatusText = "已断开"
 		}
 
-		ui.Row(c).Height(36).Shrink(0).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		sessionBar := ui.Row(c).Height(36).Shrink(0).Background(t.Surface).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2))
+		if sessionBar.Clicked() && onFocus != nil {
+			onFocus()
+		}
+		sessionBar.Children(func() {
 			// 状态药丸徽章
 			ui.Row(c).Background(vStatusBadgeBg).Padding(2, 8).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 				ui.Box(c).Width(6).Height(6).Radius(3).Background(vStatusDotColor)
@@ -408,18 +525,20 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 
 			ui.Spacer(c)
 
-			// 传输队列开关按钮
-			var taskCount int
-			var taskSpeed string
-			if s.TransferMgr != nil {
-				taskCount, taskSpeed = s.TransferMgr.GetActiveStats()
-			}
-			queueText := "传输队列"
-			if taskCount > 0 {
-				queueText = fmt.Sprintf("传输中 (%d) %s", taskCount, taskSpeed)
-			}
-			if ui.Button(c, queueText).Clicked() {
-				s.ShowTransfer = !s.ShowTransfer
+			// 传输队列开关按钮（仅远程主机展示，本地终端不涉及远程传输）
+			if s.ShouldShowTransferQueue() {
+				var taskCount int
+				var taskSpeed string
+				if s.TransferMgr != nil {
+					taskCount, taskSpeed = s.TransferMgr.GetActiveStats()
+				}
+				queueText := "传输队列"
+				if taskCount > 0 {
+					queueText = fmt.Sprintf("传输中 (%d) %s", taskCount, taskSpeed)
+				}
+				if ui.Button(c, queueText).Clicked() {
+					s.ShowTransfer = !s.ShowTransfer
+				}
 			}
 
 			// 断开状态下的重连按钮
@@ -430,42 +549,50 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 			}
 		})
 
-		// 2. 核心工作视窗 (满高渲染 Ghostty 终端，采用暗黑主题与微细圆角边框)
-		if s.Connecting {
-			ui.Column(c).Grow(1).Center().Gap(t.Space(2)).Children(func() {
-				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Warning)
-				ui.Text(c, fmt.Sprintf("正在建立安全通道至 %s:%d ...", s.Host.Address, s.Host.Port)).FontSize(13).Bold().TextColor(t.Text)
-				ui.Text(c, "通过加密通道验证身份与分配 PTY 终端").FontSize(11).TextColor(t.TextMuted)
-				if ui.Button(c, "取消连接").Clicked() {
-					s.Close()
-				}
-			})
-		} else if !s.Connected && s.ErrorMsg != "" {
-			ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Children(func() {
-				ui.Box(c).Width(10).Height(10).Radius(5).Background(t.Danger)
-				ui.Text(c, "会话连接中断").FontSize(15).Bold().TextColor(t.Danger)
-				ui.Text(c, s.ErrorMsg).FontSize(12).TextColor(t.TextMuted)
-				ui.Row(c).Gap(t.Space(2)).Children(func() {
-					if ui.PrimaryButton(c, "重新连接").Clicked() {
-						s.Start()
+		// 2. 核心工作视窗 (满高渲染 Ghostty 终端，采用暗黑终端背景)
+		ui.Column(c).Grow(1).Shrink(1).Background(ColTerminalBg).Children(func() {
+			if s.Connecting {
+				ui.Column(c).Grow(1).Center().Gap(t.Space(2)).Children(func() {
+					ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Warning)
+					connMsg := fmt.Sprintf("正在连接至 %s:%d ...", s.Host.Address, s.Host.Port)
+					if s.Host.AuthType == model.AuthTypeLocal {
+						connMsg = "正在启动本地终端..."
 					}
-					if ui.Button(c, "关闭标签页").Clicked() {
+					ui.Text(c, connMsg).FontSize(13).Bold().TextColor(ui.Hex("#F4F4F5"))
+					if ui.Button(c, "取消连接").Clicked() {
 						s.Close()
-						if onClose != nil {
-							onClose()
-						}
 					}
 				})
-			})
-		} else {
-			// Ghostty VT 终端 GPU 自绘（占据主屏完整可用高度）
-			if s.Term != nil {
-				terminal.View(c, s.Term).Grow(1).AutoFocus()
+			} else if !s.Connected && s.ErrorMsg != "" {
+				ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Children(func() {
+					ui.Box(c).Width(10).Height(10).Radius(5).Background(t.Danger)
+					ui.Text(c, "会话连接中断").FontSize(15).Bold().TextColor(t.Danger)
+					ui.Text(c, s.ErrorMsg).FontSize(12).TextColor(ui.Hex("#94A3B8"))
+					ui.Row(c).Gap(t.Space(2)).Children(func() {
+						if ui.PrimaryButton(c, "重新连接").Clicked() {
+							s.Start()
+						}
+						if ui.Button(c, "关闭标签页").Clicked() {
+							s.Close()
+							if onClose != nil {
+								onClose()
+							}
+						}
+					})
+				})
+			} else {
+				// Ghostty VT 终端 GPU 自绘（占据主屏完整可用高度）
+				if s.Term != nil {
+					termElem := terminal.View(c, s.Term).Grow(1)
+					if termElem.Focused() && onFocus != nil {
+						onFocus()
+					}
+				}
 			}
-		}
+		})
 
 		// 3. 传输队列抽屉 (底部浮动展示)
-		if s.ShowTransfer && s.TransferMgr != nil {
+		if s.ShouldShowTransferQueue() && s.ShowTransfer && s.TransferMgr != nil {
 			s.renderTransferDrawer(c, t)
 		}
 	})
@@ -483,43 +610,67 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 			}
 		}
 
-		// 2. 快捷导航图标按钮组 (4 个图标按钮：返回上级、根目录、家目录、刷新，hover 时显示文字)
-		ui.Row(c).Height(26).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-			// 返回上级
-			btnUp := ui.Button(c, "").Tooltip("返回上级").Grow(1).Height(26).Padding(0, 0).Center()
-			btnUp.Children(func() {
-				ui.Icon(c, IconArrowUp).Width(13).Height(13)
-			})
-			if btnUp.Clicked() {
-				s.NavigateUp()
-			}
+		// 2. 快捷导航图标工具栏 (复刻桌面原生 Ghost 图标按钮，告别厚重网页 Button 质感)
+		ui.Row(c).Height(26).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "快捷导航").FontSize(11).Bold().TextColor(t.TextMuted)
+			ui.Spacer(c)
 
-			// 根目录 (/)
-			btnRoot := ui.Button(c, "").Tooltip("根目录 (/)").Grow(1).Height(26).Padding(0, 0).Center()
-			btnRoot.Children(func() {
-				ui.Icon(c, IconHardDrive).Width(13).Height(13)
-			})
-			if btnRoot.Clicked() {
-				s.NavigateTo("/")
-			}
+			ui.Row(c).AlignItems(ui.Center).Gap(2).Children(func() {
+				// 辅助渲染扁平图标按钮
+				renderToolBtn := func(tooltip string, icon *ui.SVG, isActive bool, onClick func()) {
+					btn := ui.ButtonBase(c).Tooltip(tooltip).Width(24).Height(24).Radius(t.Radius - 2).Center()
+					iconCol := ColSidebarText
+					if isActive {
+						btn.Background(ui.Hex("#DBEAFE"))
+						iconCol = ui.Hex("#2563EB")
+					}
+					if btn.Hovered() {
+						if isActive {
+							btn.Background(ui.Hex("#BFDBFE"))
+						} else {
+							btn.Background(ui.Hex("#E2E8F0"))
+							iconCol = t.Text
+						}
+					}
+					btn.Children(func() {
+						ui.Icon(c, icon).Width(13).Height(13).TextColor(iconCol)
+					})
+					if btn.Clicked() {
+						onClick()
+					}
+				}
 
-			// 家目录 (~)
-			btnHome := ui.Button(c, "").Tooltip("家目录 (~)").Grow(1).Height(26).Padding(0, 0).Center()
-			btnHome.Children(func() {
-				ui.Icon(c, IconHome).Width(13).Height(13)
-			})
-			if btnHome.Clicked() {
-				s.NavigateHome()
-			}
+				// 返回上级
+				renderToolBtn("返回上级", IconArrowUp, false, func() {
+					s.NavigateUp()
+				})
 
-			// 刷新
-			btnRefresh := ui.Button(c, "").Tooltip("刷新列表").Grow(1).Height(26).Padding(0, 0).Center()
-			btnRefresh.Children(func() {
-				ui.Icon(c, IconRefresh).Width(13).Height(13)
+				// 根目录 (/)
+				renderToolBtn("根目录 (/)", IconHardDrive, false, func() {
+					s.NavigateTo("/")
+				})
+
+				// 家目录 (~)
+				renderToolBtn("家目录 (~)", IconHome, false, func() {
+					s.NavigateHome()
+				})
+
+				// 刷新列表
+				renderToolBtn("刷新列表", IconRefresh, false, func() {
+					s.RefreshFiles()
+				})
+
+				// 显示/隐藏隐藏文件 (激活时柔和浅蓝高亮，无需突兀边框与小绿点)
+				hiddenTooltip := "显示隐藏文件"
+				hiddenIcon := IconEyeOff
+				if s.ShowHidden {
+					hiddenTooltip = "隐藏隐藏文件"
+					hiddenIcon = IconEye
+				}
+				renderToolBtn(hiddenTooltip, hiddenIcon, s.ShowHidden, func() {
+					s.ShowHidden = !s.ShowHidden
+				})
 			})
-			if btnRefresh.Clicked() {
-				s.RefreshFiles()
-			}
 		})
 
 		if s.FileError != "" {
@@ -533,8 +684,21 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 		// 紧凑文件列表 (滚动视图，每行 26px，使用左侧 r/d 语义标记，右键操作菜单)
 		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Column(c).Gap(1).Children(func() {
-				for _, entry := range s.FileList {
+				files := s.VisibleFiles()
+				if len(files) == 0 {
+					ui.Column(c).Padding(t.Space(4)).Center().Gap(t.Space(1)).Children(func() {
+						if len(s.FileList) > 0 {
+							ui.Text(c, "当前仅含隐藏文件").FontSize(11).TextColor(t.TextMuted)
+							ui.Text(c, "点击上方眼睛按钮可开启显示").FontSize(10.5).TextColor(t.TextMuted)
+						} else if !s.FileLoading {
+							ui.Text(c, "目录为空").FontSize(11).TextColor(t.TextMuted)
+						}
+					})
+				}
+
+				for _, entry := range files {
 					item := entry
+					isHidden := strings.HasPrefix(item.Name, ".")
 					isSel := s.selectedPath == item.Path
 
 					rowBg := ui.Transparent
@@ -558,8 +722,20 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 									onOpenFile(item)
 								}
 							}
-							if m.Item("下载到本地 (~/Downloads)").Chosen() {
-								s.DownloadEntry(item)
+							if s.ShouldShowTransferQueue() {
+								if m.Item("下载到本地 (~/Downloads)").Chosen() {
+									s.DownloadEntry(item)
+								}
+							}
+						}
+						m.Separator()
+						if s.ShowHidden {
+							if m.Item("隐藏隐藏文件").Chosen() {
+								s.ShowHidden = false
+							}
+						} else {
+							if m.Item("显示隐藏文件").Chosen() {
+								s.ShowHidden = true
 							}
 						}
 						m.Separator()
@@ -588,10 +764,10 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 					}
 
 					row.Children(func() {
-						// 1. 文件左侧用 r、d 标识是文件还是目录（d 为目录采用主题强调色，r 为常规文件采用静音色）
+						// 1. 文件左侧用 r、d 标识是文件还是目录（d 为目录采用黄色徽章，r 为常规文件采用静音灰色）
 						if item.IsDir {
-							ui.Row(c).Width(16).Height(16).Radius(2).Background(ui.Hex("#EFF6FF")).Center().Children(func() {
-								ui.Text(c, "d").FontSize(10.5).Bold().TextColor(t.Accent)
+							ui.Row(c).Width(16).Height(16).Radius(2).Background(ui.Hex("#FEF3C7")).Center().Children(func() {
+								ui.Text(c, "d").FontSize(10.5).Bold().TextColor(ui.Hex("#D97706"))
 							})
 						} else {
 							ui.Row(c).Width(16).Height(16).Radius(2).Background(ui.Hex("#F1F5F9")).Center().Children(func() {
@@ -599,8 +775,12 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 							})
 						}
 
-						// 2. 文件/目录名称
-						nameElem := ui.Text(c, item.Name).FontSize(11).TextColor(t.Text).Grow(1)
+						// 2. 文件/目录名称 (隐藏文件文字采用次级柔和色)
+						nameCol := t.Text
+						if isHidden {
+							nameCol = t.TextMuted
+						}
+						nameElem := ui.Text(c, item.Name).FontSize(11).TextColor(nameCol).Grow(1)
 						if item.IsDir {
 							nameElem.Bold()
 						}

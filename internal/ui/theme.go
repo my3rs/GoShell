@@ -52,6 +52,9 @@ var (
 	ColBadgePurpleText = ui.Hex("#7E22CE")
 	ColBadgeGrayBg    = ui.Hex("#F1F5F9")
 	ColBadgeGrayText  = ui.Hex("#475569")
+
+	// Terminal 终端视窗专属暗色背景 (严格仅终端视窗生效，与 Ghostty / terminal.DarkTheme 一致)
+	ColTerminalBg = ui.Hex("#18181B")
 )
 
 // HostThemeColor 定义单个节点专属的主题色标组
