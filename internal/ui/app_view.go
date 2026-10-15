@@ -5,7 +5,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -52,7 +51,6 @@ type AppView struct {
 	// 布局尺寸
 	sidebarWidth     float32
 	sidebarCollapsed bool
-	sidebarDragging  bool
 
 	// 侧边栏当前激活 Tab: 0 = 主机列表, 1 = 远程文件
 	sidebarTab int
@@ -135,58 +133,16 @@ func (v *AppView) View(c *ui.Context) {
 	}
 
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
-		// 1. 主体工作区（支持侧边栏平滑折叠/展开动画与拖拽调整宽度）
-		mainRow := ui.Row(c).Key("main_workspace_split").Grow(1).AlignItems(ui.Stretch)
-
-		targetWidth := float32(0)
-		if !v.sidebarCollapsed {
-			targetWidth = v.sidebarWidth
-		}
-
-		var currentWidth float32
-		if v.sidebarDragging {
-			currentWidth = mainRow.Jump("sidebar_w", v.sidebarWidth)
+		// 1. 主体工作区（折叠时工作区 100% 铺满，展开时双栏并列可自由拖拽调节宽度）
+		if v.sidebarCollapsed {
+			v.renderWorkspace(c, t)
 		} else {
-			currentWidth = mainRow.AnimateWith("sidebar_w", targetWidth, 220*time.Millisecond, ui.EaseOut)
-		}
-
-		mainRow.Children(func() {
-			if currentWidth > 0.5 {
-				// 侧边栏外层裁剪容器：宽度为动态动画值 currentWidth，内部保持目标 sidebarWidth 以防挤压
-				ui.Box(c).Width(currentWidth).Shrink(0).Clip().Children(func() {
-					ui.Row(c).Width(v.sidebarWidth).AlignItems(ui.Stretch).Children(func() {
-						v.renderSidebar(c, t)
-					})
-				})
-
-				// 仅在完全展开状态下渲染可拖拽调宽手柄
-				if !v.sidebarCollapsed && currentWidth >= v.sidebarWidth-1 {
-					divider := ui.Row(c).Width(4).Cursor(ui.CursorResizeEW).Center()
-					dx, _, held := divider.Dragged()
-					v.sidebarDragging = held
-					if held {
-						newW := v.sidebarWidth + dx
-						if newW < 180 {
-							newW = 180
-						} else if newW > 500 {
-							newW = 500
-						}
-						v.sidebarWidth = newW
-						mainRow.Jump("sidebar_w", v.sidebarWidth)
-					}
-					divColor := ColSidebarBorder
-					if held || divider.Hovered() {
-						divColor = t.Accent
-					}
-					ui.Box(c).Width(1).Fill().Background(divColor)
-				}
-			}
-
-			// 右侧多标签工作区（自动撑满剩余宽度）
-			ui.Box(c).Grow(1).Shrink(1).Children(func() {
+			ui.Split(c, &v.sidebarWidth, func() {
+				v.renderSidebar(c, t)
+			}, func() {
 				v.renderWorkspace(c, t)
-			})
-		})
+			}).Grow(1)
+		}
 
 		// 2. 底部状态栏
 		v.renderStatusBar(c, t)
@@ -218,7 +174,7 @@ func (v *AppView) ToggleSidebar() {
 
 // 左侧边栏 (复刻 docker-mate 的 app-sidebar 风格，采用 hsl(212, 31%, 95%) 底色)
 func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().Background(ColSidebarBg).Padding(t.Space(2)).Gap(t.Space(2)).Border(1, ColSidebarBorder).Children(func() {
+	ui.Column(c).Fill().Background(ColSidebarBg).Padding(t.Space(2)).Gap(t.Space(2)).Children(func() {
 		// 1. 紧凑边栏头部：品牌标识与操作图标组 (高度 28px)
 		ui.Row(c).Height(28).Padding(0, t.Space(1)).AlignItems(ui.Center).Children(func() {
 			brandRow := ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Padding(2, 4).Radius(t.Radius - 2).Tooltip("关于 GoShell")
@@ -499,27 +455,23 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 顶部多标签栏 (下方开放无缝衔接工作区，依靠底色自然区分)
 		tabToClose := -1
-		ui.Row(c).Height(36).Background(ColSidebarBg).Padding(0, 8, 0, 8).AlignItems(ui.End).Gap(0).Children(func() {
-			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符 (高度与 Top 与各 Tab 严格水平对齐)
+		ui.Row(c).Height(36).Background(ColSidebarBg).Padding(0, 8, 0, 8).AlignItems(ui.Center).Gap(4).Children(func() {
+			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符 (高度与各 Tab 严格水平居中对齐)
 			if v.sidebarCollapsed {
-				ui.Row(c).Height(34).Top(1).AlignItems(ui.Center).Margin(0, 2, 0, 0).Children(func() {
-					btnExpand := ui.ButtonBase(c).Tooltip("展开侧边栏 (Cmd+B)").Width(24).Height(24).Radius(4).Center()
-					expandIconCol := t.TextMuted
-					if btnExpand.Hovered() {
-						btnExpand.Background(ui.Hex("#DFE5EC"))
-						expandIconCol = t.Text
-					}
-					btnExpand.Children(func() {
-						ui.Icon(c, IconPanelLeftOpen).Width(13).Height(13).TextColor(expandIconCol)
-					})
-					if btnExpand.Clicked() {
-						v.ToggleSidebar()
-					}
+				btnExpand := ui.ButtonBase(c).Tooltip("展开侧边栏 (Cmd+B)").Width(26).Height(26).Radius(t.Radius - 2).Center()
+				expandIconCol := t.TextMuted
+				if btnExpand.Hovered() {
+					btnExpand.Background(ui.Hex("#DFE5EC"))
+					expandIconCol = t.Text
+				}
+				btnExpand.Children(func() {
+					ui.Icon(c, IconPanelLeftOpen).Width(13).Height(13).TextColor(expandIconCol)
 				})
+				if btnExpand.Clicked() {
+					v.ToggleSidebar()
+				}
 
-				ui.Row(c).Width(1).Height(34).Top(1).AlignItems(ui.Center).Margin(0, 4, 0, 2).Children(func() {
-					ui.Box(c).Width(1).Height(14).Background(ui.Hex("#CBD5E1"))
-				})
+				ui.Box(c).Width(1).Height(14).Background(ui.Hex("#CBD5E1")).Margin(0, 2, 0, 2)
 			}
 
 			for i := range v.tabs {
@@ -532,17 +484,6 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				isFocused := v.activeTabIndex == index
 				posLabel, paneIdx := v.getTabPanePositionLabel(index)
 				isTiled := (paneIdx >= 0 && !isFocused)
-
-				// 相邻非激活 Tab 之间占位保持稳定，仅在两者皆非激活且非平铺展示时显示 1px 细分割线
-				if i > 0 {
-					sepColor := ui.Transparent
-					if !isFocused && !isTiled && (v.activeTabIndex != i-1) {
-						sepColor = ui.Hex("#CBD5E1")
-					}
-					ui.Row(c).Width(1).Height(34).Top(1).AlignItems(ui.Center).Children(func() {
-						ui.Box(c).Width(1).Height(14).Background(sepColor)
-					})
-				}
 
 				// 提示信息构造
 				tip := ""
@@ -570,96 +511,70 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					}
 				}
 
-				// 统一定义 Tab 外层容器：高 34px，Top(1)，顶部对齐，确保激活与非激活状态顶部水平线绝对一致
-				tabWrapper := ui.Row(c).Height(34).Top(1).AlignItems(ui.Start).Shrink(1).MaxWidth(220)
-				if tip != "" {
-					tabWrapper.Tooltip(tip)
+				// Tab 卡片：高 28px 居中对齐，圆角与左侧主机、文件 Tab 完全一致 (Radius: t.Radius - 2，精确 4px)
+				cardBg := ui.Transparent
+				if isFocused {
+					cardBg = t.Surface // 激活态纯白卡片底色
+				} else if isTiled {
+					cardBg = ui.Hex("#F1F5F9") // 平铺态淡灰卡片底色
 				}
-				tabWrapper.ContextMenu(func(m *ui.Menu) {
+
+				tabCard := ui.Row(c).Height(28).AlignItems(ui.Center).Gap(t.Space(1.5)).
+					Background(cardBg).
+					Radius(t.Radius - 2).
+					Padding(0, 10).
+					Shrink(1).
+					MaxWidth(220)
+
+				if !isFocused && !isTiled && tabCard.Hovered() {
+					tabCard.Background(ui.Hex("#DFE5EC"))
+				}
+
+				if tip != "" {
+					tabCard.Tooltip(tip)
+				}
+				tabCard.ContextMenu(func(m *ui.Menu) {
 					v.renderTabContextMenu(m, c, tab, index, &tabToClose)
 				})
-				if tabToClose != index && tabWrapper.Clicked() {
+				if tabToClose != index && tabCard.Clicked() {
 					v.switchActivePaneToTab(index)
 				}
 
-				tabWrapper.Children(func() {
-					if isFocused {
-						// 1. 激活状态：Chrome 标签页造型 (左外凹圆角端盖 4px + 纯白内容主体 8px内边距 + 右外凹圆角端盖 4px)
-						// 左外圆角端盖 (包含左下平滑外凹圆角与左上圆角)
-						ui.Image(c, ChromeTabCapLeft).Width(4).Height(34)
-
-						// Tab 纯白主体：高 34px 贯穿底部与工作区无缝融合，顶部 1px 分割线，底部 1px 内边距平衡顶部边框使中心在 17px
-						tabBody := ui.Row(c).Height(34).AlignItems(ui.Center).Gap(t.Space(1.5)).
-							Background(t.Surface).
-							BorderWidth(1, 0, 0, 0).
-							BorderColor(t.Border).
-							Padding(0, 8, 1, 8)
-
-						tabBody.Children(func() {
-							v.renderTabItems(c, t, tab, index, isFocused, isTiled, posLabel, &tabToClose)
-						})
-
-						// 右外圆角端盖 (包含右上圆角与右下平滑外凹圆角)
-						ui.Image(c, ChromeTabCapRight).Width(4).Height(34)
-					} else {
-						// 2. 非激活或平铺状态：
-						// • 顶端与激活态绝对水平齐平 (Top: 0)
-						// • 底端高 30px (留出 4px 悬浮间距，绝不延伸触碰底端边界)
-						// • Padding(4, 12, 0, 12)：顶部 4px 补偿内边距，使内容垂直中心线精确恒定在 17px，切换 0 跳变
-						cardBg := ui.Transparent
-						if isTiled {
-							cardBg = ui.Hex("#F1F5F9")
-						} else if tabWrapper.Hovered() {
-							cardBg = ui.Hex("#DFE5EC")
-						}
-
-						tabCard := ui.Row(c).Height(30).AlignItems(ui.Center).Gap(t.Space(1.5)).
-							Background(cardBg).
-							Radius(6).
-							Padding(4, 12, 0, 12)
-						if isTiled {
-							tabCard.Border(1, ui.Hex("#CBD5E1"))
-						}
-
-						tabCard.Children(func() {
-							v.renderTabItems(c, t, tab, index, isFocused, isTiled, posLabel, &tabToClose)
-						})
-					}
+				tabCard.Children(func() {
+					v.renderTabItems(c, t, tab, index, isFocused, isTiled, posLabel, &tabToClose)
 				})
 			}
 
-			// Chrome 风格的新建标签快捷按钮 (+)
-			ui.Row(c).Height(34).Top(1).AlignItems(ui.Center).Margin(0, 0, 0, 2).Children(func() {
-				btnNew := ui.Row(c).Width(24).Height(24).Radius(4).Center()
-				if btnNew.Hovered() {
-					btnNew.Background(ui.Hex("#DFE5EC"))
+			// 新建标签快捷按钮 (+)
+			btnNew := ui.Row(c).Width(26).Height(26).Radius(t.Radius - 2).Center()
+			if btnNew.Hovered() {
+				btnNew.Background(ui.Hex("#DFE5EC"))
+			}
+			btnNew.Children(func() {
+				ui.Icon(c, IconPlus).Width(12).Height(12).TextColor(t.TextMuted)
+			})
+			btnNew.Tooltip("新建终端或主机连接")
+			btnNew.Menu(func(m *ui.Menu) {
+				if m.Item("新建 SSH 主机...").Chosen() {
+					v.openCreateModal()
 				}
-				btnNew.Children(func() {
-					ui.Icon(c, IconPlus).Width(12).Height(12).TextColor(t.TextMuted)
-				})
-				btnNew.Tooltip("新建终端或主机连接")
-				btnNew.Menu(func(m *ui.Menu) {
-					if m.Item("新建 SSH 主机...").Chosen() {
-						v.openCreateModal()
-					}
-					if m.Item("打开本地终端 (新标签)").Chosen() {
-						v.openNewLocalTerminal()
-					}
-					if len(v.app.Hosts) > 0 {
-						m.Separator()
-						for _, h := range v.app.Hosts {
-							host := h
-							openCount := v.getHostSessionCount(host.ID)
-							label := "连接 " + host.Name
-							if openCount > 0 {
-								label = fmt.Sprintf("新建 %s 终端 (%d 已打开)", host.Name, openCount)
-							}
-							if m.Item(label).Chosen() {
-								v.openNewHostSession(host)
-							}
+				if m.Item("打开本地终端 (新标签)").Chosen() {
+					v.openNewLocalTerminal()
+				}
+				if len(v.app.Hosts) > 0 {
+					m.Separator()
+					for _, h := range v.app.Hosts {
+						host := h
+						openCount := v.getHostSessionCount(host.ID)
+						label := "连接 " + host.Name
+						if openCount > 0 {
+							label = fmt.Sprintf("新建 %s 终端 (%d 已打开)", host.Name, openCount)
+						}
+						if m.Item(label).Chosen() {
+							v.openNewHostSession(host)
 						}
 					}
-				})
+				}
 			})
 
 			ui.Spacer(c)
@@ -866,10 +781,6 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 			ui.Icon(c, IconFile).Width(12).Height(12).TextColor(fileIconCol)
 			// 文件名
 			ui.Text(c, tab.Title).FontSize(12).Bold().TextColor(textColor).SingleLine()
-			// 所属主机标识微型胶囊 (直观展示属于哪个连接)
-			ui.Row(c).Background(hColor.Bg).Padding(1, 4).Radius(3).Children(func() {
-				ui.Text(c, tab.Session.Host.Name).FontSize(9.5).Bold().TextColor(hColor.Accent)
-			})
 			// 未保存修改指示黄点
 			if tab.Editor != nil && tab.Editor.Buffer != nil && tab.Editor.Buffer.Modified() {
 				ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Warning)
@@ -1320,18 +1231,8 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 						_ = v.app.ReloadData()
 					}
 				}
-				openCount := v.getHostSessionCount(host.ID)
-				if openCount > 0 {
-					if ui.Button(c, fmt.Sprintf("切换到终端 (%d)", openCount)).Clicked() {
-						v.openHostSession(host)
-					}
-					if ui.PrimaryButton(c, "+ 新建终端标签").Clicked() {
-						v.openNewHostSession(host)
-					}
-				} else {
-					if ui.PrimaryButton(c, "连接").Clicked() {
-						v.openNewHostSession(host)
-					}
+				if ui.PrimaryButton(c, "连接").Clicked() {
+					v.openNewHostSession(host)
 				}
 			})
 		})
@@ -1361,12 +1262,6 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 				} else {
 					v.renderFieldItem(c, t, "密码状态", "AES-256 已加密保存")
 				}
-			})
-
-			// 属性行 3
-			ui.Row(c).Gap(t.Space(8)).Children(func() {
-				v.renderFieldItem(c, t, "创建时间", host.CreatedAt.Format("2006-01-02 15:04:05"))
-				v.renderFieldItem(c, t, "更新时间", host.UpdatedAt.Format("2006-01-02 15:04:05"))
 			})
 		})
 	})

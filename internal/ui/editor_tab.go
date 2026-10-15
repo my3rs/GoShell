@@ -192,14 +192,16 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 			// 完整远程绝对路径
 			ui.Text(c, ef.Path).FontSize(11).TextColor(t.TextMuted)
 
-			// 保存状态徽章
+			// 保存状态徽章 (参考终端页面药丸徽章规范)
 			if ef.Buffer != nil && ef.Buffer.Modified() {
-				ui.Row(c).Background(ColBadgeAmberBg).Padding(1, 6).Radius(t.Radius).Children(func() {
-					ui.Text(c, "● 未保存").FontSize(10).Bold().TextColor(ColBadgeAmberText)
+				ui.Row(c).Background(ColBadgeAmberBg).Padding(2, 8).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+					ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Warning)
+					ui.Text(c, "未保存").FontSize(10.5).Bold().TextColor(ColBadgeAmberText)
 				})
 			} else if !ef.Loading && ef.LoadErr == "" && !ef.IsBinary {
-				ui.Row(c).Background(ColBadgeGreenBg).Padding(1, 6).Radius(t.Radius).Children(func() {
-					ui.Text(c, "已保存").FontSize(10).Bold().TextColor(ColBadgeGreenText)
+				ui.Row(c).Background(ColBadgeGreenBg).Padding(2, 8).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+					ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
+					ui.Text(c, "已保存").FontSize(10.5).Bold().TextColor(ColBadgeGreenText)
 				})
 			}
 

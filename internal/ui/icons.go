@@ -60,10 +60,10 @@ var (
 
 	IconPanelLeftOpen = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>`))
 
-	// Chrome 风格标签页两端平滑倒圆角端盖 (与下方内容无缝衔接的外向凹圆角与顶角过渡，精巧 4px 规格)
-	ChromeTabCapLeft = ui.MustParseSVG([]byte(`<svg width="4" height="34" viewBox="0 0 4 34" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M 0 34 Q 2 34 2 29 L 2 5 Q 2 0.5 4 0.5 L 4 34 Z" fill="#FFFFFF"/><path d="M 0 33.5 Q 2 33.5 2 29 L 2 5 Q 2 0.5 4 0.5" stroke="#DAE1E9" stroke-width="1" fill="none"/></svg>`))
+	// Chrome 风格标签页两端平滑倒圆角端盖 (与下方内容无缝衔接的外向凹圆角与顶角过渡，精巧 4px 规格，无边框纯色过渡)
+	ChromeTabCapLeft = ui.MustParseSVG([]byte(`<svg width="4" height="34" viewBox="0 0 4 34" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M 0 34 Q 2 34 2 29 L 2 5 Q 2 0 4 0 L 4 34 Z" fill="#FFFFFF"/></svg>`))
 
-	ChromeTabCapRight = ui.MustParseSVG([]byte(`<svg width="4" height="34" viewBox="0 0 4 34" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M 0 0.5 Q 2 0.5 2 5 L 2 29 Q 2 34 4 34 L 0 34 Z" fill="#FFFFFF"/><path d="M 0 0.5 Q 2 0.5 2 5 L 2 29 Q 2 33.5 4 33.5" stroke="#DAE1E9" stroke-width="1" fill="none"/></svg>`))
+	ChromeTabCapRight = ui.MustParseSVG([]byte(`<svg width="4" height="34" viewBox="0 0 4 34" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M 0 0 Q 2 0 2 5 L 2 29 Q 2 34 4 34 L 0 34 Z" fill="#FFFFFF"/></svg>`))
 
 	IconInfo = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`))
 )
