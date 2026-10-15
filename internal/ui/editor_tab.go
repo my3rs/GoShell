@@ -221,13 +221,13 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 
 		// 2. 主体编辑内容区域
 		if ef.Loading {
-			ui.Column(c).Fill().Center().Gap(t.Space(2)).Children(func() {
+			ui.Column(c).Grow(1).Center().Gap(t.Space(2)).Children(func() {
 				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Accent)
 				ui.Text(c, fmt.Sprintf("正在从服务器读取文件: %s", ef.Path)).FontSize(13).Bold().TextColor(t.Text)
 				ui.Text(c, "通过加密通道获取文件流并初始化代码高亮引擎...").FontSize(11).TextColor(t.TextMuted)
 			})
 		} else if ef.LoadErr != "" {
-			ui.Column(c).Fill().Center().Gap(t.Space(3)).Children(func() {
+			ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Children(func() {
 				ui.Box(c).Width(10).Height(10).Radius(5).Background(t.Danger)
 				ui.Text(c, "读取文件失败").FontSize(15).Bold().TextColor(t.Danger)
 				ui.Text(c, ef.LoadErr).FontSize(12).TextColor(t.TextMuted)
@@ -236,7 +236,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		} else if ef.IsBinary {
-			ui.Column(c).Fill().Center().Gap(t.Space(3)).Children(func() {
+			ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Children(func() {
 				ui.Icon(c, IconFile).TextColor(t.TextMuted).Width(36).Height(36)
 				ui.Text(c, "该文件为二进制格式，不支持在线代码就地编辑").FontSize(15).Bold().TextColor(t.Text)
 				ui.Text(c, "在线编辑器专为 Shell 脚本、配置文件、Python、Go、JSON、YAML、SQL 等文本文件设计。").FontSize(12).TextColor(t.TextMuted)
@@ -254,7 +254,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme) {
 		}
 
 		// 3. 底部状态栏 (高度 24px)
-		ui.Row(c).Height(24).Background(ColSidebarBg).Border(1, ColSidebarBorder).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+		ui.Row(c).Height(24).Shrink(0).Background(ColSidebarBg).Border(1, ColSidebarBorder).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
 			if ef.State != nil && ef.Buffer != nil {
 				pos := ef.State.CursorPos()
 				ui.Text(c, fmt.Sprintf("行 %d, 列 %d", pos.Line+1, pos.Col+1)).FontSize(10.5).TextColor(t.TextMuted)

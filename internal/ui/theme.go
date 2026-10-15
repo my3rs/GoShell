@@ -53,3 +53,21 @@ var (
 	ColBadgeGrayBg    = ui.Hex("#F1F5F9")
 	ColBadgeGrayText  = ui.Hex("#475569")
 )
+
+// HostThemeColor 定义单个节点专属的主题色标组
+type HostThemeColor struct {
+	Accent ui.Color // 主色：顶边色标、图标色、高亮
+	Bg     ui.Color // 浅色底
+}
+
+// HostColorPalette 现代桌面克制配色池 (8 种优雅、对比鲜明的高级色彩)
+var HostColorPalette = []HostThemeColor{
+	{Accent: ui.Hex("#2563EB"), Bg: ui.Hex("#EFF6FF")}, // 湛蓝 (Classic Blue)
+	{Accent: ui.Hex("#059669"), Bg: ui.Hex("#ECFDF5")}, // 翡翠青 (Emerald)
+	{Accent: ui.Hex("#7C3AED"), Bg: ui.Hex("#F5F3FF")}, // 紫罗兰 (Violet)
+	{Accent: ui.Hex("#D97706"), Bg: ui.Hex("#FFFBEB")}, // 暖琥珀 (Amber)
+	{Accent: ui.Hex("#E11D48"), Bg: ui.Hex("#FFF1F2")}, // 珊瑚红 (Rose)
+	{Accent: ui.Hex("#0891B2"), Bg: ui.Hex("#ECFEFF")}, // 天青蓝 (Teal)
+	{Accent: ui.Hex("#4F46E5"), Bg: ui.Hex("#EEF2FF")}, // 靛青 (Indigo)
+	{Accent: ui.Hex("#0D9488"), Bg: ui.Hex("#F0FDFA")}, // 墨青 (Dark Teal)
+}

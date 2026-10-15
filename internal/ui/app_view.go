@@ -99,7 +99,7 @@ func (v *AppView) View(c *ui.Context) {
 			v.renderSidebar(c, t)
 		}, func() {
 			v.renderWorkspace(c, t)
-		}).Fill()
+		}).Grow(1)
 
 		// 2. 底部状态栏
 		v.renderStatusBar(c, t)
@@ -117,29 +117,42 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 		// 1. 紧凑边栏头部：品牌标识与操作图标组 (高度 28px)
 		ui.Row(c).Height(28).Padding(0, t.Space(1)).AlignItems(ui.Center).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-				ui.Image(c, goShellLogo).Size(18, 18)
+				ui.Image(c, goShellLogo).Size(24, 24)
 				ui.Text(c, "GoShell").FontSize(13).Bold().TextColor(t.Text)
 			})
 
 			ui.Spacer(c)
 
-			// 添加主机小图标按钮
-			btnAdd := ui.Button(c, "").Tooltip("添加 SSH 主机").Height(24).Width(24).Center()
-			btnAdd.Children(func() {
-				ui.Icon(c, IconPlus).Width(12).Height(12)
-			})
-			if btnAdd.Clicked() {
-				v.openCreateModal()
-			}
+			// 操作图标按钮组 (添加主机与刷新列表，完全居中，悬浮高亮)
+			ui.Row(c).AlignItems(ui.Center).Gap(2).Children(func() {
+				// 添加主机小图标按钮
+				btnAdd := ui.ButtonBase(c).Tooltip("添加 SSH 主机").Width(24).Height(24).Radius(t.Radius - 2).Center()
+				addIconCol := ColSidebarText
+				if btnAdd.Hovered() {
+					btnAdd.Background(ui.Hex("#E2E8F0"))
+					addIconCol = t.Text
+				}
+				btnAdd.Children(func() {
+					ui.Icon(c, IconPlus).Width(13).Height(13).TextColor(addIconCol)
+				})
+				if btnAdd.Clicked() {
+					v.openCreateModal()
+				}
 
-			// 刷新小图标按钮
-			btnRefresh := ui.Button(c, "").Tooltip("刷新列表").Height(24).Width(24).Center()
-			btnRefresh.Children(func() {
-				ui.Icon(c, IconRefresh).Width(12).Height(12)
+				// 刷新小图标按钮
+				btnRefresh := ui.ButtonBase(c).Tooltip("刷新列表").Width(24).Height(24).Radius(t.Radius - 2).Center()
+				refreshIconCol := ColSidebarText
+				if btnRefresh.Hovered() {
+					btnRefresh.Background(ui.Hex("#E2E8F0"))
+					refreshIconCol = t.Text
+				}
+				btnRefresh.Children(func() {
+					ui.Icon(c, IconRefresh).Width(13).Height(13).TextColor(refreshIconCol)
+				})
+				if btnRefresh.Clicked() {
+					_ = v.app.ReloadData()
+				}
 			})
-			if btnRefresh.Clicked() {
-				_ = v.app.ReloadData()
-			}
 		})
 
 		// 2. 双 Tab 切换控制器 (Segmented Tab Bar)
@@ -167,12 +180,7 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 			}
 			ui.Row(c).Grow(1).Height(24).Background(fileTabBg).Radius(t.Radius - 2).Center().Gap(t.Space(1)).Children(func() {
 				ui.Icon(c, IconFolder).TextColor(fileTabFg).Width(12).Height(12)
-				fileLabel := "文件"
-				sessionCount := v.getSessionCount()
-				if sessionCount > 0 {
-					fileLabel = fmt.Sprintf("文件 (%d)", sessionCount)
-				}
-				ui.Text(c, fileLabel).FontSize(11).Bold().TextColor(fileTabFg)
+				ui.Text(c, "文件").FontSize(11).Bold().TextColor(fileTabFg)
 			}).OnClick(func() {
 				v.sidebarTab = 1
 			})
@@ -221,7 +229,7 @@ func (v *AppView) renderSidebarHostList(c *ui.Context, t *ui.Theme) {
 	// 边栏搜索框：直接位于列表顶部，消除对主区域空间的占用
 	ui.TextInput(c, &v.searchQuery).Placeholder("搜索主机...")
 
-	ui.Scroll(c).Fill().Children(func() {
+	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).Gap(1).Children(func() {
 			query := strings.ToLower(strings.TrimSpace(v.searchQuery))
 
@@ -248,7 +256,7 @@ func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
 	activeSession := v.getActiveSession()
 
 	if activeSession == nil {
-		ui.Column(c).Fill().Center().Gap(t.Space(3)).Padding(t.Space(4)).Children(func() {
+		ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Padding(t.Space(4)).Children(func() {
 			ui.Icon(c, IconFolder).TextColor(t.TextMuted).Width(32).Height(32)
 			ui.Text(c, "暂无活跃终端连接").FontSize(13).Bold().TextColor(t.TextMuted)
 			ui.Text(c, "请在「主机节点」中连接一台服务器或开启本地终端以浏览远程文件。").FontSize(11).TextColor(t.TextMuted)
@@ -309,7 +317,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 顶部多标签栏 (复刻 docker-mate 的 Tabs 标签导航风格)
 		tabToClose := -1
-		ui.Row(c).Height(36).Background(ColSidebarBg).Padding(4, t.Space(2)).Gap(4).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
+		ui.Row(c).Height(36).Shrink(0).Background(ColSidebarBg).Padding(4, t.Space(2)).Gap(4).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
 			for i := range v.tabs {
 				index := i
 				tab := v.tabs[index]
@@ -330,15 +338,45 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					title += " ●"
 				}
 
-				tabItem := ui.Row(c).Height(28).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Padding(0, t.Space(2.5)).AlignItems(ui.Center).Gap(t.Space(1.5))
-				tabItem.Children(func() {
+				// 方案 1: 同色系色标法 - 获取所属节点专属色彩
+				var hColor HostThemeColor
+				hasColor := false
+				if tab.Session != nil {
+					hColor = tab.Session.HostColor()
+					hasColor = true
+				}
+
+				tabItem := ui.Column(c).Height(28).Background(tabBg).Border(1, borderCol).Radius(t.Radius).Clip()
+
+				// 顶部 2px 归属色彩标记条 (激活时 100% 饱和，未激活时 40% 微透)
+				if hasColor {
+					topAlpha := float32(0.4)
+					if isActive {
+						topAlpha = 1.0
+					}
+					ui.Box(c).Height(2).FillWidth().Background(hColor.Accent.Alpha(topAlpha))
+				} else {
+					ui.Box(c).Height(2).FillWidth().Background(ui.Transparent)
+				}
+
+				// Tab 内容区域 (图标、标题、关闭按钮)
+				ui.Row(c).Grow(1).Padding(0, t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+					iconCol := textColor
+					if hasColor {
+						if isActive {
+							iconCol = hColor.Accent
+						} else {
+							iconCol = hColor.Accent.Alpha(0.7)
+						}
+					}
+
 					switch tab.Type {
 					case TabTypeOverview:
-						ui.Icon(c, IconActivity).TextColor(textColor).Width(12).Height(12)
+						ui.Icon(c, IconActivity).TextColor(iconCol).Width(12).Height(12)
 					case TabTypeSession:
-						ui.Icon(c, IconTerminal).TextColor(textColor).Width(12).Height(12)
+						ui.Icon(c, IconTerminal).TextColor(iconCol).Width(12).Height(12)
 					case TabTypeEditor:
-						ui.Icon(c, IconFile).TextColor(textColor).Width(12).Height(12)
+						ui.Icon(c, IconFile).TextColor(iconCol).Width(12).Height(12)
 					}
 
 					ui.Text(c, title).FontSize(12).TextColor(textColor).Bold()
@@ -359,6 +397,14 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 						}
 					}
 				})
+
+				// 悬停提示
+				if tab.Type == TabTypeSession && tab.Session != nil {
+					tabItem.Tooltip(fmt.Sprintf("主机会话: %s (%s)", tab.Session.Host.Name, tab.Session.Host.Address))
+				} else if tab.Type == TabTypeEditor && tab.Editor != nil && tab.Session != nil {
+					tabItem.Tooltip(fmt.Sprintf("所属主机: %s\n文件路径: %s", tab.Session.Host.Name, tab.Editor.Path))
+				}
+
 				if tabItem.Clicked() {
 					v.activeTabIndex = index
 				}
@@ -400,7 +446,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 
 // 主机属性审查与操作面板 (精简首页：不展示看板数量与功能特性，仅保留添加主机、刷新列表与当前选中主机信息及操作)
 func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
-	ui.Scroll(c).Fill().Padding(t.Space(6)).Children(func() {
+	ui.Scroll(c).Grow(1).Padding(t.Space(6)).Children(func() {
 		ui.Column(c).Gap(t.Space(4)).Children(func() {
 			// 顶部功能条：仅「刷新列表」与「+ 添加 SSH 主机」
 			ui.Row(c).Height(38).AlignItems(ui.Center).Children(func() {
@@ -518,15 +564,6 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 				v.renderFieldItem(c, t, "更新时间", host.UpdatedAt.Format("2006-01-02 15:04:05"))
 			})
 		})
-
-		// 状态与就绪说明通知栏 (复刻 docker-mate 的 Alert 样式)
-		ui.Row(c).Background(ui.Hex("#F0FDF4")).Border(1, ui.Hex("#BBF7D0")).Padding(t.Space(3), t.Space(3.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-			ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
-			ui.Column(c).Grow(1).Gap(1).Children(func() {
-				ui.Text(c, "服务就绪 · 可直接开启多通道会话").FontSize(11.5).Bold().TextColor(ui.Hex("#15803D"))
-				ui.Text(c, "点击右上角「发起终端连接」即刻开启 Ghostty 终端，左侧支持随时无缝切换「主机节点」与「SFTP 远程文件」。").FontSize(10.5).TextColor(ui.Hex("#166534"))
-			})
-		})
 	})
 }
 
@@ -579,7 +616,7 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 		}
 	}
 
-	ui.Row(c).Height(26).Background(ColSidebarBg).Padding(0, t.Space(3)).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
+	ui.Row(c).Height(26).Shrink(0).Background(ColSidebarBg).Padding(0, t.Space(3)).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
 		// 左边：状态指示点 + 就绪状态
 		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 			ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
@@ -814,6 +851,23 @@ func (v *AppView) openHostSession(h *model.Host) {
 	}
 
 	session := NewTerminalSession(h)
+
+	// 分配在当前所有打开会话中未被使用的节点专属色彩（方案 1: 同色系色标法）
+	usedColors := make(map[int]bool)
+	for _, t := range v.tabs {
+		if t.Type == TabTypeSession && t.Session != nil {
+			usedColors[t.Session.ColorIndex] = true
+		}
+	}
+	colorIdx := 0
+	for i := 0; i < len(HostColorPalette); i++ {
+		if !usedColors[i] {
+			colorIdx = i
+			break
+		}
+	}
+	session.ColorIndex = colorIdx
+
 	v.tabs = append(v.tabs, WorkspaceTab{
 		Type:    TabTypeSession,
 		Title:   h.Name,
@@ -824,7 +878,7 @@ func (v *AppView) openHostSession(h *model.Host) {
 	session.Start()
 }
 
-// openFileInEditor 在工作区打开或切换到指定文件的就地编辑器 Tab
+// openFileInEditor 在工作区打开或切换到指定文件的就地编辑器 Tab（方案 3：空间邻近吸附插入）
 func (v *AppView) openFileInEditor(s *TerminalSession, entry sftpService.FileEntry) {
 	for i, t := range v.tabs {
 		if t.Type == TabTypeEditor && t.Editor != nil && t.Editor.Session == s && t.Editor.Path == entry.Path {
@@ -836,13 +890,34 @@ func (v *AppView) openFileInEditor(s *TerminalSession, entry sftpService.FileEnt
 	edFile := NewEditorFile(s, entry.Path, entry.Name, entry.Size)
 	edFile.LoadAsync()
 
-	v.tabs = append(v.tabs, WorkspaceTab{
+	newTab := WorkspaceTab{
 		Type:    TabTypeEditor,
 		Title:   entry.Name,
 		Session: s,
 		Editor:  edFile,
-	})
-	v.activeTabIndex = len(v.tabs) - 1
+	}
+
+	// 方案 3: 查找所属主机的最后一个 Tab 位置进行就近插入，保持同一主机的文件在空间上紧密聚合
+	insertIdx := -1
+	for i := len(v.tabs) - 1; i >= 0; i-- {
+		if v.tabs[i].Session == s {
+			insertIdx = i
+			break
+		}
+	}
+
+	if insertIdx >= 0 {
+		targetIdx := insertIdx + 1
+		newTabs := make([]WorkspaceTab, 0, len(v.tabs)+1)
+		newTabs = append(newTabs, v.tabs[:targetIdx]...)
+		newTabs = append(newTabs, newTab)
+		newTabs = append(newTabs, v.tabs[targetIdx:]...)
+		v.tabs = newTabs
+		v.activeTabIndex = targetIdx
+	} else {
+		v.tabs = append(v.tabs, newTab)
+		v.activeTabIndex = len(v.tabs) - 1
+	}
 }
 
 // closeTab 关闭指定索引的 Tab

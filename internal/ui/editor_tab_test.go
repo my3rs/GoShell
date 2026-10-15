@@ -73,3 +73,16 @@ func TestEditor_BinaryDetection(t *testing.T) {
 		t.Errorf("Binary data should contain null bytes")
 	}
 }
+
+func TestSession_HostColors(t *testing.T) {
+	if len(HostColorPalette) < 6 {
+		t.Errorf("HostColorPalette should have at least 6 colors, got %d", len(HostColorPalette))
+	}
+
+	s1 := &TerminalSession{ColorIndex: 0}
+	s2 := &TerminalSession{ColorIndex: 1}
+
+	if s1.HostColor().Accent == s2.HostColor().Accent {
+		t.Errorf("Adjacent sessions should have different colors")
+	}
+}

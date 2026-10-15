@@ -48,6 +48,21 @@ type TerminalSession struct {
 
 	StartTime time.Time
 	mu        sync.Mutex
+
+	// 节点专属配色分配索引
+	ColorIndex int
+}
+
+// HostColor 返回当前会话节点的专属配色方案
+func (s *TerminalSession) HostColor() HostThemeColor {
+	if s == nil {
+		return HostColorPalette[0]
+	}
+	idx := s.ColorIndex % len(HostColorPalette)
+	if idx < 0 {
+		idx = 0
+	}
+	return HostColorPalette[idx]
 }
 
 // NewTerminalSession 初始化一个新的会话实例
@@ -378,7 +393,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 			vStatusText = "已断开"
 		}
 
-		ui.Row(c).Height(36).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Row(c).Height(36).Shrink(0).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 			// 状态药丸徽章
 			ui.Row(c).Background(vStatusBadgeBg).Padding(2, 8).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 				ui.Box(c).Width(6).Height(6).Radius(3).Background(vStatusDotColor)
@@ -417,7 +432,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 
 		// 2. 核心工作视窗 (满高渲染 Ghostty 终端，采用暗黑主题与微细圆角边框)
 		if s.Connecting {
-			ui.Column(c).Fill().Center().Gap(t.Space(2)).Children(func() {
+			ui.Column(c).Grow(1).Center().Gap(t.Space(2)).Children(func() {
 				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Warning)
 				ui.Text(c, fmt.Sprintf("正在建立安全通道至 %s:%d ...", s.Host.Address, s.Host.Port)).FontSize(13).Bold().TextColor(t.Text)
 				ui.Text(c, "通过加密通道验证身份与分配 PTY 终端").FontSize(11).TextColor(t.TextMuted)
@@ -426,7 +441,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 				}
 			})
 		} else if !s.Connected && s.ErrorMsg != "" {
-			ui.Column(c).Fill().Center().Gap(t.Space(3)).Children(func() {
+			ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Children(func() {
 				ui.Box(c).Width(10).Height(10).Radius(5).Background(t.Danger)
 				ui.Text(c, "会话连接中断").FontSize(15).Bold().TextColor(t.Danger)
 				ui.Text(c, s.ErrorMsg).FontSize(12).TextColor(t.TextMuted)
@@ -445,7 +460,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 		} else {
 			// Ghostty VT 终端 GPU 自绘（占据主屏完整可用高度）
 			if s.Term != nil {
-				terminal.View(c, s.Term).Fill().AutoFocus()
+				terminal.View(c, s.Term).Grow(1).AutoFocus()
 			}
 		}
 
@@ -458,7 +473,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 
 // RenderSidebarFileExplorer 在左侧边栏渲染现代文件目录浏览器 (左侧带 r/d 标识，支持双击目录进入/双击文件就地编辑，右键完整菜单)
 func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, onOpenFile func(entry sftpService.FileEntry)) {
-	ui.Column(c).Fill().Background(ColSidebarBg).Padding(t.Space(1.5)).Gap(t.Space(1.5)).Children(func() {
+	ui.Column(c).Grow(1).Gap(t.Space(1.5)).Children(func() {
 		// 1. 路径输入框 (单层原生边框，对齐无偏移，回车即可跳转)
 		pathInput := ui.TextInput(c, &s.PathInput).Placeholder("输入路径按回车跳转...")
 		if pathInput.Submitted() {
@@ -471,7 +486,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 		// 2. 快捷导航图标按钮组 (4 个图标按钮：返回上级、根目录、家目录、刷新，hover 时显示文字)
 		ui.Row(c).Height(26).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 			// 返回上级
-			btnUp := ui.Button(c, "").Tooltip("返回上级").Grow(1).Height(26).Center()
+			btnUp := ui.Button(c, "").Tooltip("返回上级").Grow(1).Height(26).Padding(0, 0).Center()
 			btnUp.Children(func() {
 				ui.Icon(c, IconArrowUp).Width(13).Height(13)
 			})
@@ -480,7 +495,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 			}
 
 			// 根目录 (/)
-			btnRoot := ui.Button(c, "").Tooltip("根目录 (/)").Grow(1).Height(26).Center()
+			btnRoot := ui.Button(c, "").Tooltip("根目录 (/)").Grow(1).Height(26).Padding(0, 0).Center()
 			btnRoot.Children(func() {
 				ui.Icon(c, IconHardDrive).Width(13).Height(13)
 			})
@@ -489,7 +504,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 			}
 
 			// 家目录 (~)
-			btnHome := ui.Button(c, "").Tooltip("家目录 (~)").Grow(1).Height(26).Center()
+			btnHome := ui.Button(c, "").Tooltip("家目录 (~)").Grow(1).Height(26).Padding(0, 0).Center()
 			btnHome.Children(func() {
 				ui.Icon(c, IconHome).Width(13).Height(13)
 			})
@@ -498,7 +513,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 			}
 
 			// 刷新
-			btnRefresh := ui.Button(c, "").Tooltip("刷新列表").Grow(1).Height(26).Center()
+			btnRefresh := ui.Button(c, "").Tooltip("刷新列表").Grow(1).Height(26).Padding(0, 0).Center()
 			btnRefresh.Children(func() {
 				ui.Icon(c, IconRefresh).Width(13).Height(13)
 			})
@@ -516,7 +531,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 		ui.Box(c).Height(1).Background(ColSidebarBorder)
 
 		// 紧凑文件列表 (滚动视图，每行 26px，使用左侧 r/d 语义标记，右键操作菜单)
-		ui.Scroll(c).Fill().Children(func() {
+		ui.Scroll(c).Grow(1).Children(func() {
 			ui.Column(c).Gap(1).Children(func() {
 				for _, entry := range s.FileList {
 					item := entry
