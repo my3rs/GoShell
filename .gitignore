@@ -1,8 +1,16 @@
 # Binaries
 bin/
+goshell
 *.exe
 *.dll
 *.dylib
+*.so
+*.syso
+*.a
+*.o
+*.test
+*.out
+
 
 # Local data & temp
 *.db
@@ -11,6 +19,10 @@ bin/
 master.key
 .DS_Store
 
+# Dependencies
+vendor/
+
 # IDE
 .idea/
 .vscode/
+
