@@ -21,6 +21,9 @@ type AppView struct {
 	// 布局尺寸
 	sidebarWidth float32
 
+	// 侧边栏当前激活 Tab: 0 = 主机列表, 1 = 文件管理
+	sidebarTab int
+
 	// 交互状态与多标签会话
 	searchQuery    string
 	activeTabIndex int
@@ -46,7 +49,8 @@ func NewAppView(application *app.App) *AppView {
 	v := &AppView{
 		app:          application,
 		theme:        ModernLightTheme(),
-		sidebarWidth: 240,
+		sidebarWidth: 280, // 加宽侧边栏以舒适展示文件列表
+		sidebarTab:   0,   // 默认展示主机列表
 		formPort:     "22",
 		formUsername: "root",
 		formAuthType: "password",
@@ -69,7 +73,7 @@ func (v *AppView) View(c *ui.Context) {
 		// 1. 原生桌面紧凑工具栏
 		v.renderToolbar(c, t)
 
-		// 2. 主体工作区（左侧资产树 + 右侧工作面板）
+		// 2. 主体工作区（左侧双 Tab 侧边栏 + 右侧全屏工作区）
 		ui.Split(c, &v.sidebarWidth, func() {
 			v.renderSidebar(c, t)
 		}, func() {
@@ -113,79 +117,140 @@ func (v *AppView) renderToolbar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// 左侧资产树与主机列表 (紧凑 26px 行高)
+// 左侧边栏 (支持两栏 Tab 切换：0 = 主机列表，1 = 文件管理)
 func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().Background(ui.Hex("#F8F9FA")).Padding(t.Space(1.5)).Gap(t.Space(1)).Border(1, t.Border).Children(func() {
-		// 边栏顶部小标题
-		ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "主机与集群").FontSize(11).Bold().TextColor(t.TextMuted)
-			ui.Spacer(c)
-			ui.Text(c, fmt.Sprintf("共 %d 台", len(v.app.Hosts))).FontSize(11).TextColor(t.TextMuted)
-		})
+	ui.Column(c).Fill().Background(ui.Hex("#F8F9FA")).Padding(t.Space(1.5)).Gap(t.Space(1.5)).Border(1, t.Border).Children(func() {
+		// 顶部侧边栏 Tab 切换分段控制器 (Segmented Tab Bar)
+		ui.Row(c).Height(28).Background(ui.Hex("#EBF0F5")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
+			// Tab 0: 主机列表
+			hostTabBg := ui.Hex("#EBF0F5")
+			hostTabFg := t.TextMuted
+			if v.sidebarTab == 0 {
+				hostTabBg = t.Surface
+				hostTabFg = t.Text
+			}
+			ui.Row(c).Grow(1).Height(24).Background(hostTabBg).Radius(t.Radius).Center().Children(func() {
+				ui.Text(c, fmt.Sprintf("主机列表 (%d)", len(v.app.Hosts))).FontSize(11).Bold().TextColor(hostTabFg)
+			}).OnClick(func() {
+				v.sidebarTab = 0
+			})
 
-		// 滚动列表
-		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).Gap(t.Space(2)).Children(func() {
-				query := strings.ToLower(strings.TrimSpace(v.searchQuery))
-
-				for _, group := range v.app.Groups {
-					var groupHosts []*model.Host
-					for _, h := range v.app.Hosts {
-						if h.GroupID == group.ID {
-							if query == "" || strings.Contains(strings.ToLower(h.Name), query) || strings.Contains(strings.ToLower(h.Address), query) {
-								groupHosts = append(groupHosts, h)
-							}
-						}
-					}
-
-					if len(groupHosts) == 0 && query != "" {
-						continue
-					}
-
-					// 分组栏
-					ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-						ui.Text(c, group.Name).FontSize(11).Bold().TextColor(t.TextMuted)
-						ui.Spacer(c)
-						ui.Text(c, strconv.Itoa(len(groupHosts))).FontSize(11).TextColor(ui.Hex("#9AA2B1"))
-					})
-
-					// 主机项（原生桌面紧凑行）
-					for _, h := range groupHosts {
-						v.renderHostRow(c, t, h)
-					}
+			// Tab 1: 文件管理
+			fileTabBg := ui.Hex("#EBF0F5")
+			fileTabFg := t.TextMuted
+			if v.sidebarTab == 1 {
+				fileTabBg = t.Surface
+				fileTabFg = t.Text
+			}
+			ui.Row(c).Grow(1).Height(24).Background(fileTabBg).Radius(t.Radius).Center().Children(func() {
+				fileLabel := "文件管理"
+				if len(v.sessions) > 0 {
+					fileLabel = fmt.Sprintf("文件管理 (%d)", len(v.sessions))
 				}
-
-				// 渲染未分组或无归属的主机
-				var ungroupedHosts []*model.Host
-				for _, h := range v.app.Hosts {
-					found := false
-					for _, g := range v.app.Groups {
-						if h.GroupID == g.ID {
-							found = true
-							break
-						}
-					}
-					if !found {
-						if query == "" || strings.Contains(strings.ToLower(h.Name), query) || strings.Contains(strings.ToLower(h.Address), query) {
-							ungroupedHosts = append(ungroupedHosts, h)
-						}
-					}
-				}
-
-				if len(ungroupedHosts) > 0 {
-					ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-						ui.Text(c, "未分组主机").FontSize(11).Bold().TextColor(t.TextMuted)
-						ui.Spacer(c)
-						ui.Text(c, strconv.Itoa(len(ungroupedHosts))).FontSize(11).TextColor(ui.Hex("#9AA2B1"))
-					})
-
-					for _, h := range ungroupedHosts {
-						v.renderHostRow(c, t, h)
-					}
-				}
+				ui.Text(c, fileLabel).FontSize(11).Bold().TextColor(fileTabFg)
+			}).OnClick(func() {
+				v.sidebarTab = 1
 			})
 		})
+
+		ui.Box(c).Height(1).Background(t.Border)
+
+		// 视窗内容分流
+		if v.sidebarTab == 0 {
+			v.renderSidebarHostList(c, t)
+		} else {
+			v.renderSidebarFilePanel(c, t)
+		}
 	})
+}
+
+// 侧边栏内容 1: 主机资产树
+func (v *AppView) renderSidebarHostList(c *ui.Context, t *ui.Theme) {
+	ui.Scroll(c).Fill().Children(func() {
+		ui.Column(c).Gap(t.Space(2)).Children(func() {
+			query := strings.ToLower(strings.TrimSpace(v.searchQuery))
+
+			for _, group := range v.app.Groups {
+				var groupHosts []*model.Host
+				for _, h := range v.app.Hosts {
+					if h.GroupID == group.ID {
+						if query == "" || strings.Contains(strings.ToLower(h.Name), query) || strings.Contains(strings.ToLower(h.Address), query) {
+							groupHosts = append(groupHosts, h)
+						}
+					}
+				}
+
+				if len(groupHosts) == 0 && query != "" {
+					continue
+				}
+
+				// 分组栏
+				ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+					ui.Text(c, group.Name).FontSize(11).Bold().TextColor(t.TextMuted)
+					ui.Spacer(c)
+					ui.Text(c, strconv.Itoa(len(groupHosts))).FontSize(11).TextColor(ui.Hex("#9AA2B1"))
+				})
+
+				for _, h := range groupHosts {
+					v.renderHostRow(c, t, h)
+				}
+			}
+
+			// 渲染未分组或无归属的主机
+			var ungroupedHosts []*model.Host
+			for _, h := range v.app.Hosts {
+				found := false
+				for _, g := range v.app.Groups {
+					if h.GroupID == g.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					if query == "" || strings.Contains(strings.ToLower(h.Name), query) || strings.Contains(strings.ToLower(h.Address), query) {
+						ungroupedHosts = append(ungroupedHosts, h)
+					}
+				}
+			}
+
+			if len(ungroupedHosts) > 0 {
+				ui.Row(c).Padding(t.Space(1), t.Space(2)).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "未分组主机").FontSize(11).Bold().TextColor(t.TextMuted)
+					ui.Spacer(c)
+					ui.Text(c, strconv.Itoa(len(ungroupedHosts))).FontSize(11).TextColor(ui.Hex("#9AA2B1"))
+				})
+
+				for _, h := range ungroupedHosts {
+					v.renderHostRow(c, t, h)
+				}
+			}
+		})
+	})
+}
+
+// 侧边栏内容 2: 远程文件管理器
+func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
+	// 获取当前活跃会话
+	var activeSession *TerminalSession
+	if v.activeTabIndex > 0 && v.activeTabIndex-1 < len(v.sessions) {
+		activeSession = v.sessions[v.activeTabIndex-1]
+	} else if len(v.sessions) > 0 {
+		activeSession = v.sessions[0]
+	}
+
+	if activeSession == nil {
+		ui.Column(c).Fill().Center().Gap(t.Space(3)).Padding(t.Space(4)).Children(func() {
+			ui.Text(c, "暂无活跃连接").FontSize(13).Bold().TextColor(t.TextMuted)
+			ui.Text(c, "请在「主机列表」中连接一台服务器或开启本地终端以浏览远程文件。").FontSize(11).TextColor(t.TextMuted)
+			if ui.PrimaryButton(c, "前往主机列表").Clicked() {
+				v.sidebarTab = 0
+			}
+		})
+		return
+	}
+
+	// 渲染当前会话的文件浏览器
+	activeSession.RenderSidebarFileExplorer(c, t)
 }
 
 // 辅助渲染单行主机资产项
@@ -220,7 +285,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 	})
 }
 
-// 右侧工作区 (多标签管理 + 概览面板 / Ghostty 终端渲染)
+// 右侧工作区 (多标签管理 + 概览面板 / 满高 Ghostty 终端渲染)
 func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 原生多标签栏 (紧凑 30px)
@@ -268,6 +333,8 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				session := v.sessions[sessionIndex]
 				session.Render(c, t, func() {
 					v.closeSessionTab(v.activeTabIndex)
+				}, func() {
+					v.sidebarTab = 1 // 切换到左侧文件标签
 				})
 			} else {
 				v.renderInspectorDashboard(c, t)
@@ -363,9 +430,9 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 			ui.Column(c).Background(ui.Hex("#F4F9F6")).Border(1, ui.Hex("#D2ECE0")).Padding(t.Space(3.5)).Radius(t.Radius).Gap(t.Space(1)).Children(func() {
 				ui.Row(c).Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
 					ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
-					ui.Text(c, "第二阶段：原生 Ghostty VT 终端引擎已接入").FontSize(12).Bold().TextColor(ui.Hex("#0D6832"))
+					ui.Text(c, "服务就绪").FontSize(12).Bold().TextColor(ui.Hex("#0D6832"))
 				})
-				ui.Text(c, "点击右上角「发起终端连接」，即可在独立标签页中启动高性能 GPU 自绘终端并建立 SSH 通道。").FontSize(11).TextColor(ui.Hex("#2B6E4E"))
+				ui.Text(c, "点击右上角「发起终端连接」，右侧将开启满屏终端，左侧可随时无缝切换「主机列表」与「文件管理」。").FontSize(11).TextColor(ui.Hex("#2B6E4E"))
 			})
 		})
 	})
@@ -387,7 +454,7 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 		ui.Text(c, fmt.Sprintf(" | 活跃会话: %d 个", len(v.sessions))).FontSize(11).TextColor(t.TextMuted)
 		ui.Text(c, " | 数据库: "+v.app.DataDir+"/goshell.db").FontSize(11).TextColor(t.TextMuted)
 		ui.Spacer(c)
-		ui.Text(c, "GoShell v0.2.0 (Phase 2 Ready)").FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, "GoShell v0.3.0").FontSize(11).TextColor(t.TextMuted)
 	})
 }
 

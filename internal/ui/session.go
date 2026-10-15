@@ -21,7 +21,7 @@ import (
 	"goshell/internal/core/transfer"
 )
 
-// TerminalSession 代表一个活跃的终端会话实例，整合 SSH 终端与 SFTP 文件浏览器
+// TerminalSession 代表一个活跃的终端会话实例，整合 SSH 终端与 SFTP 文件服务
 type TerminalSession struct {
 	ID        string
 	Host      *model.Host
@@ -38,11 +38,9 @@ type TerminalSession struct {
 	FileLoading bool
 	FileError   string
 
-	// UI 交互与分屏控制
-	ShowSFTP       bool
-	ShowTransfer   bool
-	termHeight     float32
-	selectedPath   string
+	// UI 交互控制
+	ShowTransfer bool
+	selectedPath string
 
 	Connecting bool
 	Connected  bool
@@ -58,8 +56,6 @@ func NewTerminalSession(host *model.Host) *TerminalSession {
 		ID:         uuid.New().String(),
 		Host:       host,
 		Title:      host.Name,
-		ShowSFTP:   true,
-		termHeight: 380, // 终端默认高度 380px，下方分屏留给 SFTP
 		StartTime:  time.Now(),
 		CurrentDir: "/",
 	}
@@ -201,7 +197,6 @@ func (s *TerminalSession) RefreshFiles() {
 		var err error
 
 		if s.Host.AuthType == model.AuthTypeLocal {
-			// 本地文件系统扫描
 			osEntries, readErr := os.ReadDir(dir)
 			if readErr != nil {
 				err = readErr
@@ -230,11 +225,10 @@ func (s *TerminalSession) RefreshFiles() {
 				})
 			}
 		} else {
-			// 远程 SFTP 文件扫描
 			if s.SFTPClient != nil {
 				entries, err = s.SFTPClient.ListDirectory(dir)
 			} else {
-				err = fmt.Errorf("SFTP 子信道未建立")
+				err = fmt.Errorf("SFTP 信道未就绪")
 			}
 		}
 
@@ -249,7 +243,7 @@ func (s *TerminalSession) RefreshFiles() {
 	}()
 }
 
-// NavigateTo 进入指定子目录
+// NavigateTo 进入指定目录
 func (s *TerminalSession) NavigateTo(targetPath string) {
 	s.mu.Lock()
 	s.CurrentDir = targetPath
@@ -272,7 +266,7 @@ func (s *TerminalSession) NavigateUp() {
 	s.RefreshFiles()
 }
 
-// DownloadEntry 下载远程文件到本地 Downloads 目录
+// DownloadEntry 下载文件到本地 Downloads 目录
 func (s *TerminalSession) DownloadEntry(entry sftpService.FileEntry) {
 	if entry.IsDir || s.TransferMgr == nil {
 		return
@@ -303,7 +297,7 @@ func (s *TerminalSession) DeleteEntry(entry sftpService.FileEntry) {
 	}()
 }
 
-// Close 关闭会话所有资源
+// Close 关闭会话所有底层资源
 func (s *TerminalSession) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -333,8 +327,8 @@ func (s *TerminalSession) Close() {
 	}
 }
 
-// Render 渲染主会话面板（支持上下垂直分屏：上终端 + 下 SFTP）
-func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func()) {
+// Render 在主工作区全高渲染终端界面（免除底部挤占，100% 满屏高度）
+func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onSwitchToFiles func()) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 1. 会话控制栏 (28px 紧凑高度)
 		vStatusColor := t.Success
@@ -353,13 +347,11 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func()) {
 
 			ui.Spacer(c)
 
-			// SFTP 面板折叠/展开开关
-			sftpToggleText := "显示文件管理"
-			if s.ShowSFTP {
-				sftpToggleText = "隐藏文件管理"
-			}
-			if ui.Button(c, sftpToggleText).Clicked() {
-				s.ShowSFTP = !s.ShowSFTP
+			// 快捷切换到左侧文件标签
+			if ui.Button(c, "查看左侧文件").Clicked() {
+				if onSwitchToFiles != nil {
+					onSwitchToFiles()
+				}
 			}
 
 			// 传输队列开关
@@ -390,12 +382,12 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func()) {
 			}
 		})
 
-		// 2. 核心工作视窗
+		// 2. 核心工作视窗 (满高渲染 Ghostty 终端)
 		if s.Connecting {
 			ui.Column(c).Fill().Center().Gap(t.Space(2)).Children(func() {
 				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Warning)
 				ui.Text(c, fmt.Sprintf("正在建立安全通道至 %s:%s ...", s.Host.Address, strconv.Itoa(s.Host.Port))).FontSize(13).Bold().TextColor(t.Text)
-				ui.Text(c, "同时初始化 PTY 交互终端与独立 SFTP 文件服务").FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, "通过加密通道验证身份与分配 PTY 终端").FontSize(11).TextColor(t.TextMuted)
 				if ui.Button(c, "取消连接").Clicked() {
 					s.Close()
 				}
@@ -418,19 +410,9 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func()) {
 				})
 			})
 		} else {
-			// 终端与 SFTP 垂直上下分屏 (SplitVertical)
-			if s.ShowSFTP {
-				ui.SplitVertical(c, &s.termHeight, func() {
-					if s.Term != nil {
-						terminal.View(c, s.Term).Fill().AutoFocus()
-					}
-				}, func() {
-					s.renderSFTPExplorer(c, t)
-				}).Fill()
-			} else {
-				if s.Term != nil {
-					terminal.View(c, s.Term).Fill().AutoFocus()
-				}
+			// Ghostty VT 终端 GPU 自绘（占据主屏完整可用高度）
+			if s.Term != nil {
+				terminal.View(c, s.Term).Fill().AutoFocus()
 			}
 		}
 
@@ -441,110 +423,97 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func()) {
 	})
 }
 
-// 渲染 SFTP 资源管理器面板 (下方视窗，包含面包屑导航与文件列表表格)
-func (s *TerminalSession) renderSFTPExplorer(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).Fill().Background(t.Surface).Border(1, t.Border).Children(func() {
-		// 导航工具栏 (紧凑 32px)
-		ui.Row(c).Height(32).Background(ui.Hex("#F8F9FA")).Border(1, t.Border).Padding(0, t.Space(2.5)).Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "文件浏览:").FontSize(11).Bold().TextColor(t.TextMuted)
+// RenderSidebarFileExplorer 在左侧边栏渲染紧凑的文件目录浏览器
+func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme) {
+	ui.Column(c).Fill().Background(ui.Hex("#F8F9FA")).Padding(t.Space(1.5)).Gap(t.Space(1.5)).Children(func() {
+		// 当前会话主机信息栏
+		ui.Row(c).Height(24).Padding(0, t.Space(1.5)).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Width(6).Height(6).Radius(3).Background(t.Success)
+			ui.Text(c, " "+s.Host.Name).FontSize(11).Bold().TextColor(t.Text)
+			ui.Spacer(c)
+			if s.FileLoading {
+				ui.Text(c, "读取中...").FontSize(10).TextColor(t.Warning)
+			} else {
+				ui.Text(c, fmt.Sprintf("%d 项", len(s.FileList))).FontSize(10).TextColor(t.TextMuted)
+			}
+		})
 
-			// 路径导航条
-			ui.Row(c).Background(ui.Hex("#FFFFFF")).Border(1, t.Border).Padding(t.Space(0.5), t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, s.CurrentDir).FontSize(11).Bold().TextColor(t.Text)
-			})
+		// 路径导航条 (紧凑卡片)
+		ui.Row(c).Height(26).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, s.CurrentDir).FontSize(11).Bold().TextColor(t.Text)
+		})
 
-			ui.Box(c).Width(1).Height(14).Background(t.Border)
-
-			if ui.Button(c, "返回上级").Clicked() {
+		// 操作按钮组 (返回上级、根目录、刷新)
+		ui.Row(c).Height(24).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c, "上级").Clicked() {
 				s.NavigateUp()
 			}
-
 			if ui.Button(c, "根目录 /").Clicked() {
 				s.NavigateTo("/")
 			}
-
 			if ui.Button(c, "刷新").Clicked() {
 				s.RefreshFiles()
 			}
-
-			ui.Spacer(c)
-
-			if s.FileLoading {
-				ui.Text(c, "正在读取目录...").FontSize(11).TextColor(t.Warning)
-			} else {
-				ui.Text(c, fmt.Sprintf("共 %d 项", len(s.FileList))).FontSize(11).TextColor(t.TextMuted)
-			}
 		})
 
-		// 报错提示
 		if s.FileError != "" {
-			ui.Row(c).Height(24).Background(ui.Hex("#FEE2E2")).Padding(0, t.Space(3)).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "访问错误: "+s.FileError).FontSize(11).TextColor(t.Danger)
+			ui.Row(c).Background(ui.Hex("#FEE2E2")).Padding(t.Space(1), t.Space(2)).Radius(t.Radius).Children(func() {
+				ui.Text(c, "错误: "+s.FileError).FontSize(10).TextColor(t.Danger)
 			})
 		}
 
-		// 文件表格列头 (24px)
-		ui.Row(c).Height(24).Background(ui.Hex("#F1F3F5")).Border(1, t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "文件名称").FontSize(11).Bold().TextColor(t.TextMuted).Width(320)
-			ui.Text(c, "文件大小").FontSize(11).Bold().TextColor(t.TextMuted).Width(100)
-			ui.Text(c, "权限属性").FontSize(11).Bold().TextColor(t.TextMuted).Width(110)
-			ui.Text(c, "修改时间").FontSize(11).Bold().TextColor(t.TextMuted).Width(140)
-			ui.Spacer(c)
-			ui.Text(c, "操作").FontSize(11).Bold().TextColor(t.TextMuted).Width(90)
-		})
+		ui.Box(c).Height(1).Background(t.Border)
 
-		// 滚动文件列表
+		// 紧凑文件列表 (滚动视图，每行 24px)
 		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).Children(func() {
+			ui.Column(c).Gap(t.Space(0.5)).Children(func() {
 				for _, entry := range s.FileList {
-					item := entry // 闭包变量捕获
+					item := entry
 					isSel := s.selectedPath == item.Path
 
-					rowBg := t.Surface
+					rowBg := ui.Hex("#F8F9FA")
+					borderCol := ui.Hex("#F8F9FA")
 					if isSel {
-						rowBg = ui.Hex("#EFF6FF")
+						rowBg = ui.Hex("#EBF1FA")
+						borderCol = ui.Hex("#B8D3F7")
 					}
 
-					ui.Row(c).Height(26).Background(rowBg).Border(1, ui.Hex("#F1F3F5")).Padding(0, t.Space(3)).AlignItems(ui.Center).Children(func() {
-						// 名称与类型指示
-						typeLabel := "[文件]"
-						typeColor := t.Text
+					ui.Row(c).Height(24).Background(rowBg).Border(1, borderCol).Padding(0, t.Space(1.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+						// 目录与文件前缀标签
+						typeTag := "[文]"
+						typeCol := t.TextMuted
 						if item.IsDir {
-							typeLabel = "[目录]"
-							typeColor = t.Accent
+							typeTag = "[目]"
+							typeCol = t.Accent
 						}
 
-						ui.Row(c).Width(320).Gap(t.Space(1.5)).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, typeLabel).FontSize(10).TextColor(typeColor)
-							ui.Text(c, item.Name).FontSize(12).TextColor(typeColor).Bold()
-						})
+						ui.Text(c, typeTag).FontSize(10).TextColor(typeCol)
 
-						// 大小
-						ui.Text(c, item.SizeHuman).FontSize(11).TextColor(t.TextMuted).Width(100)
+						// 文件名
+						nameElem := ui.Text(c, item.Name).FontSize(11).TextColor(t.Text).Grow(1)
+						if item.IsDir {
+							nameElem.Bold()
+						}
 
-						// 权限
-						ui.Text(c, item.Mode).FontSize(11).TextColor(t.TextMuted).Width(110)
+						// 文件大小
+						if !item.IsDir {
+							ui.Text(c, item.SizeHuman).FontSize(10).TextColor(t.TextMuted)
+						}
 
-						// 修改时间
-						ui.Text(c, item.ModTime.Format("2006-01-02 15:04")).FontSize(11).TextColor(t.TextMuted).Width(140)
-
-						ui.Spacer(c)
-
-						// 操作按钮组
-						ui.Row(c).Width(90).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
-							if item.IsDir {
-								if ui.Button(c, "进入").Clicked() {
-									s.NavigateTo(item.Path)
-								}
-							} else {
-								if ui.Button(c, "下载").Clicked() {
-									s.DownloadEntry(item)
-								}
+						// 行内快捷操作
+						if item.IsDir {
+							if ui.Button(c, "进入").Clicked() {
+								s.NavigateTo(item.Path)
 							}
-							if ui.Button(c, "删除").Clicked() {
-								s.DeleteEntry(item)
+						} else {
+							if ui.Button(c, "下载").Clicked() {
+								s.DownloadEntry(item)
 							}
-						})
+						}
+
+						if ui.Button(c, "删").Clicked() {
+							s.DeleteEntry(item)
+						}
 					}).OnClick(func() {
 						s.selectedPath = item.Path
 					})
@@ -554,14 +523,14 @@ func (s *TerminalSession) renderSFTPExplorer(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// 渲染传输队列抽屉
+// 渲染传输队列抽屉 (底部浮动展示)
 func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 	tasks := s.TransferMgr.GetTasks()
 
-	ui.Column(c).Height(160).Background(ui.Hex("#FAFAFC")).Border(1, t.Border).Padding(t.Space(2), t.Space(3)).Gap(t.Space(1.5)).Children(func() {
+	ui.Column(c).Height(150).Background(ui.Hex("#FAFAFC")).Border(1, t.Border).Padding(t.Space(2), t.Space(3)).Gap(t.Space(1.5)).Children(func() {
 		// 抽屉头部
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, fmt.Sprintf("后台传输队列 (共 %d 项任务)", len(tasks))).FontSize(12).Bold().TextColor(t.Text)
+			ui.Text(c, fmt.Sprintf("后台传输队列 (共 %d 项)", len(tasks))).FontSize(12).Bold().TextColor(t.Text)
 			ui.Spacer(c)
 			if ui.Button(c, "隐藏抽屉").Clicked() {
 				s.ShowTransfer = false
@@ -570,7 +539,7 @@ func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 
 		ui.Box(c).Height(1).Background(t.Border)
 
-		// 任务滚动列表
+		// 任务列表
 		ui.Scroll(c).Fill().Children(func() {
 			ui.Column(c).Gap(t.Space(1.5)).Children(func() {
 				if len(tasks) == 0 {
@@ -579,14 +548,10 @@ func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 
 				for _, task := range tasks {
 					item := task
-					ui.Row(c).Height(26).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(2.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-						// 类型微标
-						ui.Text(c, string(item.Type)).FontSize(11).Bold().TextColor(t.Accent).Width(40)
+					ui.Row(c).Height(24).Background(t.Surface).Border(1, t.Border).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						ui.Text(c, string(item.Type)).FontSize(11).Bold().TextColor(t.Accent).Width(36)
+						ui.Text(c, item.FileName).FontSize(11).Bold().TextColor(t.Text).Width(180)
 
-						// 文件名与路径
-						ui.Text(c, item.FileName).FontSize(12).Bold().TextColor(t.Text).Width(200)
-
-						// 进度百分比与速率
 						progressText := fmt.Sprintf("%.1f%% (%s)", item.Percent, item.SpeedHuman)
 						if item.Status == transfer.StatusCompleted {
 							progressText = "已完成"
@@ -595,11 +560,10 @@ func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 						} else if item.Status == transfer.StatusCanceled {
 							progressText = "已取消"
 						}
-						ui.Text(c, progressText).FontSize(11).TextColor(t.TextMuted).Width(180)
+						ui.Text(c, progressText).FontSize(11).TextColor(t.TextMuted).Width(160)
 
 						ui.Spacer(c)
 
-						// 取消按钮
 						if item.Status == transfer.StatusRunning || item.Status == transfer.StatusPending {
 							if ui.Button(c, "取消").Clicked() {
 								s.TransferMgr.CancelTask(item.ID)
