@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
+
+	"goshell/assets/natives"
 )
 
 var (
@@ -42,16 +44,13 @@ type shellConfig struct {
 
 // findWindowsShell 自动探测系统最优终端 Shell：优先 BusyBox 虚拟 Bash，其次 Git Bash，最后降级 cmd.exe
 func findWindowsShell() shellConfig {
-	// 1. 优先检查当前程序同级目录下的 busybox.exe (便携免安装虚拟 Linux/Bash 终端)
-	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "busybox.exe")
-		if stat, err := os.Stat(candidate); err == nil && !stat.IsDir() {
-			return shellConfig{
-				path:        candidate,
-				args:        []string{candidate, "sh", "-l", "-i"},
-				isUTF8Shell: true,
-				name:        "BusyBox Bash",
-			}
+	// 1. 优先使用内置或同级 BusyBox (支持单文件自动释放与绿色便携运行)
+	if p, err := natives.EnsureBusybox(); err == nil && p != "" {
+		return shellConfig{
+			path:        p,
+			args:        []string{p, "sh", "-l", "-i"},
+			isUTF8Shell: true,
+			name:        "BusyBox Bash",
 		}
 	}
 
