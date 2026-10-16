@@ -190,6 +190,51 @@ func TestAppView_LayoutSwitching(t *testing.T) {
 	}
 }
 
+func TestAppView_LayoutSwitching_OverviewOnly(t *testing.T) {
+	// 仅有概览标签页
+	v := &AppView{
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+		},
+		activeTabIndex:  0,
+		layoutMode:      LayoutSingle,
+		paneTabIndices:  [4]int{-1, -1, -1, -1},
+		activePaneIndex: 0,
+	}
+
+	// 开启左右分屏功能
+	v.SetLayoutMode(LayoutDualSplit)
+
+	// 验证：不应自动创建终端连接，tabs 数量仍为 1，activeTabIndex 仍为 0
+	if len(v.tabs) != 1 {
+		t.Fatalf("Expected tabs count to remain 1, got %d", len(v.tabs))
+	}
+	if v.activeTabIndex != 0 {
+		t.Fatalf("Expected activeTabIndex to remain 0 (Overview), got %d", v.activeTabIndex)
+	}
+	if v.layoutMode != LayoutDualSplit {
+		t.Fatalf("Expected layoutMode to be LayoutDualSplit, got %v", v.layoutMode)
+	}
+	// 验证所有窗格均为 -1 (未绑定终端)
+	for p := 0; p < 4; p++ {
+		if v.paneTabIndices[p] != -1 {
+			t.Errorf("Expected pane %d to be -1, got %d", p, v.paneTabIndices[p])
+		}
+	}
+
+	// 开启四宫格分屏功能
+	v.SetLayoutMode(LayoutQuadGrid)
+	if len(v.tabs) != 1 {
+		t.Fatalf("Expected tabs count to remain 1 in QuadGrid, got %d", len(v.tabs))
+	}
+	if v.activeTabIndex != 0 {
+		t.Fatalf("Expected activeTabIndex to remain 0 in QuadGrid, got %d", v.activeTabIndex)
+	}
+	if v.layoutMode != LayoutQuadGrid {
+		t.Fatalf("Expected layoutMode to be LayoutQuadGrid, got %v", v.layoutMode)
+	}
+}
+
 func TestAppView_PaneTabSwitchingAndSwap(t *testing.T) {
 	v := &AppView{
 		tabs: []WorkspaceTab{
@@ -662,5 +707,112 @@ func TestAppView_LocalShellTypeSwitching(t *testing.T) {
 	}
 }
 
+func TestAppView_RenameTab_WidthUpdate(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{},
+		},
+		theme: DockerMateTheme(),
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+			{Type: TabTypeSession, Title: "短名"},
+		},
+		activeTabIndex: 1,
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 800, 600)
+
+	// 第 1 帧
+	tt.Frame()
+	// 第 2 帧稳定
+	tt.Frame()
+
+	initialRect := v.lastTabRect
+	t.Logf("Initial lastTabRect: %+v", initialRect)
+
+	// 验证初始状态宽度大于 0
+	if initialRect.W <= 0 {
+		t.Fatalf("Expected initial lastTabRect.W > 0, got %f", initialRect.W)
+	}
+
+	// 打开重命名弹窗
+	v.openRenameModal(1)
+	tt.Frame()
+
+	// 1. 输入超长名字并保存
+	v.renameInput = "这是一个非常非常长的新标签页名称以便显著改变Tab宽度"
+	v.saveRenameTab()
+
+	// 弹窗关闭后的第一帧检测到标题变动并请求 Invalidate
+	tt.Frame()
+
+	// 第二帧布局更新，验证无需任何鼠标 hover/移动，lastTabRect.W 立即自适应变宽
+	tt.Frame()
+	frame2Rect := v.lastTabRect
+	if frame2Rect.W <= initialRect.W {
+		t.Fatalf("Expected frame2Rect.W (%f) to be wider than initialRect.W (%f)", frame2Rect.W, initialRect.W)
+	}
+
+	// 2. 再次重命名缩短名字并保存
+	v.openRenameModal(1)
+	tt.Frame()
+	v.renameInput = "短"
+	v.saveRenameTab()
+
+	tt.Frame()
+	tt.Frame()
+	frame4Rect := v.lastTabRect
+	if frame4Rect.W >= frame2Rect.W {
+		t.Fatalf("Expected frame4Rect.W (%f) to shrink smaller than frame2Rect.W (%f)", frame4Rect.W, frame2Rect.W)
+	}
+}
+
+func TestAppView_DualSplitNaturalOrderWithTwoTabs(t *testing.T) {
+	// 场景：包含概览及 2 个终端标签 (Tab 1 前面的标签，Tab 2 后面的标签)
+	v := &AppView{
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+			{Type: TabTypeSession, Title: "Terminal-1", Session: &TerminalSession{}},
+			{Type: TabTypeSession, Title: "Terminal-2", Session: &TerminalSession{}},
+		},
+		activeTabIndex:  2, // 用户当前聚焦在后面的标签 (Tab 2)
+		layoutMode:      LayoutSingle,
+		paneTabIndices:  [4]int{2, 0, 0, 0},
+		activePaneIndex: 0,
+	}
+
+	// 切换到左右分屏
+	v.SetLayoutMode(LayoutDualSplit)
+
+	// 验证：
+	// 1. 左窗格 (Pane 0) 必须展示前面的标签 Tab 1
+	if v.paneTabIndices[0] != 1 {
+		t.Errorf("Expected Left Pane (0) to display Tab 1 (front tab), got %d", v.paneTabIndices[0])
+	}
+	// 2. 右窗格 (Pane 1) 必须展示后面的标签 Tab 2
+	if v.paneTabIndices[1] != 2 {
+		t.Errorf("Expected Right Pane (1) to display Tab 2 (rear tab), got %d", v.paneTabIndices[1])
+	}
+	// 3. 当前聚焦窗格应跟随后面的标签 Tab 2 自动定位到右窗格 (Pane 1)
+	if v.activePaneIndex != 1 {
+		t.Errorf("Expected activePaneIndex to be 1 (Right Pane), got %d", v.activePaneIndex)
+	}
+	// 4. 当前激活 Tab 仍为 Tab 2
+	if v.activeTabIndex != 2 {
+		t.Errorf("Expected activeTabIndex to remain 2, got %d", v.activeTabIndex)
+	}
+
+	// 5. 验证位置标签与指示一致
+	lbl1, p1 := v.getTabPanePositionLabel(1)
+	if lbl1 != "左" || p1 != 0 {
+		t.Errorf("Expected Tab 1 label '左' and pane 0, got %q, %d", lbl1, p1)
+	}
+	lbl2, p2 := v.getTabPanePositionLabel(2)
+	if lbl2 != "右" || p2 != 1 {
+		t.Errorf("Expected Tab 2 label '右' and pane 1, got %q, %d", lbl2, p2)
+	}
+}
 
 

@@ -2,8 +2,6 @@
 
 当前应用使用矩形 **GO Terminal** 方案：近乎闭合的矩形外框带出 O 的轮廓，右侧开口向内回折形成 G 的短横，内部保留 `>_` 提示符。配色与 UI 一致，已接入应用侧边栏及系统图标。
 
-原终端框备选素材见 [concepts/terminal](concepts/terminal/README.md)，选定版本的预览归档见 [concepts/terminal-go](concepts/terminal-go/README.md)。
-
 | 文件 | 用途 |
 | --- | --- |
 | `logo.svg` | 浅色背景上的蓝色 GO Terminal 标志，已接入侧边栏 |

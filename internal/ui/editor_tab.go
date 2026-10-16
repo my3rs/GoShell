@@ -218,7 +218,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 			}
 
 			// 重新加载按钮
-			if ui.Button(c, "重新读取").Clicked() {
+			if ui.Button(c, "重新加载").Clicked() {
 				ef.Reload()
 			}
 
@@ -239,7 +239,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 				ui.Box(c).Width(10).Height(10).Radius(5).Background(t.Danger)
 				ui.Text(c, "读取文件失败").FontSize(15).Bold().TextColor(t.Danger)
 				ui.Text(c, ef.LoadErr).FontSize(12).TextColor(t.TextMuted)
-				if ui.PrimaryButton(c, "重试读取").Clicked() {
+				if ui.PrimaryButton(c, "重新加载").Clicked() {
 					ef.Reload()
 				}
 			})
@@ -249,7 +249,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 				ui.Text(c, "该文件为二进制格式，不支持在线代码就地编辑").FontSize(15).Bold().TextColor(t.Text)
 				ui.Text(c, "在线编辑器专为 Shell 脚本、配置文件、Python、Go、JSON、YAML、SQL 等文本文件设计。").FontSize(12).TextColor(t.TextMuted)
 				if ef.Session != nil && ef.Session.ShouldShowTransferQueue() {
-					if ui.PrimaryButton(c, "下载到本地").Clicked() {
+					if ui.PrimaryButton(c, "下载到本地 (~/Downloads)").Clicked() {
 						ef.Session.DownloadEntry(sftpService.FileEntry{
 							Name: ef.Name,
 							Path: ef.Path,

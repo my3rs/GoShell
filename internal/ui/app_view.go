@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,7 @@ type AppView struct {
 	lastTabRect     ui.Rect
 	selectedHostID  string
 	showHiddenFiles bool
+	prevTabTitles   []string
 
 	// 快速布局与多窗格状态 (左右并列、四宫格、单视窗)
 	layoutMode      WorkspaceLayoutMode
@@ -420,11 +422,11 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 			if m.Item("切换到终端").Chosen() {
 				v.openHostSession(host)
 			}
-			if m.Item("新建终端标签").Chosen() {
+			if m.Item("新建连接").Chosen() {
 				v.openNewHostSession(host)
 			}
 		} else {
-			if m.Item("连接终端").Chosen() {
+			if m.Item("连接").Chosen() {
 				v.openNewHostSession(host)
 			}
 		}
@@ -433,7 +435,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 			v.openEditModal(host)
 		}
 		m.Separator()
-		if m.Item("删除").Disabled(isLocal).Chosen() {
+		if m.Item("删除主机").Disabled(isLocal).Chosen() {
 			if !isLocal {
 				_ = v.app.Store.DeleteHost(host.ID)
 				if v.selectedHostID == host.ID {
@@ -456,7 +458,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 				}
 			})
 			if isLocal {
-				ui.Text(c, "本地 Shell 终端").FontSize(10.5).TextColor(textCol)
+				ui.Text(c, "本地终端").FontSize(10.5).TextColor(textCol)
 			} else {
 				ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(10.5).TextColor(textCol)
 			}
@@ -492,8 +494,28 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 		tabToClose := -1
 		tabBar := ui.Row(c).Key("workspace_tab_bar").Height(36).Background(ColSidebarBg).Padding(0, 8, 0, 8).AlignItems(ui.Center).Gap(4)
 
+		// 检测标签页标题或数量是否改变（如重命名、动态终端标题更新等）
+		// 在 Immediate Mode UI 下，LayoutBounds() 反映的是上一帧布局；若标题发生变动，须主动请求下一帧刷新
+		titlesChanged := len(v.tabs) != len(v.prevTabTitles)
+		if !titlesChanged {
+			for i, tab := range v.tabs {
+				if tab.Title != v.prevTabTitles[i] {
+					titlesChanged = true
+					break
+				}
+			}
+		}
+		if titlesChanged {
+			v.prevTabTitles = make([]string, len(v.tabs))
+			for i, tab := range v.tabs {
+				v.prevTabTitles[i] = tab.Title
+			}
+			c.Invalidate()
+		}
+
 		var targetRect ui.Rect
 		foundActive := false
+		var tiledRects []ui.Rect
 
 		tabBar.Children(func() {
 			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符 (高度与各 Tab 严格水平居中对齐)
@@ -551,11 +573,10 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					}
 				}
 
-				// Tab 卡片：高 28px 居中对齐，圆角与左侧主机、文件 Tab 完全一致 (Radius: t.Radius - 2，精确 4px)
+				// Tab 卡片：保持卡片背景透明，平铺底色统一在底层 tabBar.Draw 中渲染，
+				// 避免子元素不透明背景在滑动切换瞬间遮挡滑块圆角
 				cardBg := ui.Transparent
-				if isTiled {
-					cardBg = ui.Hex("#F1F5F9") // 平铺态淡灰卡片底色
-				} else if isFocused && !v.tabPillReady {
+				if isFocused && !v.tabPillReady {
 					cardBg = t.Surface // 首次无动画位置缓存时静态纯白兜底
 				}
 
@@ -572,6 +593,11 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					if bounds.W > 0 {
 						targetRect = bounds
 						foundActive = true
+					}
+				} else if isTiled {
+					bounds := tabCard.LayoutBounds()
+					if bounds.W > 0 {
+						tiledRects = append(tiledRects, bounds)
 					}
 				}
 
@@ -607,10 +633,10 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				if m.Item("快速连接").Chosen() {
 					v.openQuickConnectModal()
 				}
-				if m.Item("新建 SSH 主机...").Chosen() {
+				if m.Item("添加 SSH 主机...").Chosen() {
 					v.openCreateModal()
 				}
-				if m.Item("打开本地终端").Chosen() {
+				if m.Item("本地终端").Chosen() {
 					v.openNewLocalTerminal()
 				}
 				if len(v.app.Hosts) > 0 {
@@ -640,7 +666,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			v.lastTabRect = targetRect
 		}
 
-		if v.tabPillReady && v.lastTabRect.W > 0 {
+		if len(tiledRects) > 0 || (v.tabPillReady && v.lastTabRect.W > 0) {
 			targetX := v.lastTabRect.X
 			targetW := v.lastTabRect.W
 			pillX := tabBar.AnimateWith("ws_tab_pill_x", targetX, 180*time.Millisecond, ui.EaseOut)
@@ -649,14 +675,22 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			pillH := v.lastTabRect.H
 
 			tabBar.Draw(func(p *ui.Painter, r ui.Rect) {
-				pillRect := ui.Rect{
-					X: pillX,
-					Y: pillY,
-					W: pillW,
-					H: pillH,
+				// 1. 先绘制平铺未聚焦 Tab 的淡灰卡片底色 (处于底层)
+				for _, tr := range tiledRects {
+					p.Fill(tr, ui.Hex("#F1F5F9"), t.Radius-2)
 				}
-				p.Shadow(pillRect, t.Radius-2, 0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.08))
-				p.Fill(pillRect, t.Surface, t.Radius-2)
+
+				// 2. 绘制当前激活 Tab 的滑动白底滑块 (覆盖在上层，圆角与投影保持完整，绝不被遮挡)
+				if v.tabPillReady && v.lastTabRect.W > 0 {
+					pillRect := ui.Rect{
+						X: pillX,
+						Y: pillY,
+						W: pillW,
+						H: pillH,
+					}
+					p.Shadow(pillRect, t.Radius-2, 0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.08))
+					p.Fill(pillRect, t.Surface, t.Radius-2)
+				}
 			})
 		}
 
@@ -672,13 +706,13 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			// 2. 终端平铺视图 (支持单视窗全屏、左右双终端并列、四宫格 2x2 并列)
 			switch v.layoutMode {
 			case LayoutDualSplit:
-				ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+				ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Border(1, ui.Hex("#334155")).Children(func() {
 					v.renderTilePane(c, t, 0)
 					ui.Box(c).Width(1).Background(ui.Hex("#334155"))
 					v.renderTilePane(c, t, 1)
 				})
 			case LayoutQuadGrid:
-				ui.Column(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+				ui.Column(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Border(1, ui.Hex("#334155")).Children(func() {
 					ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 						v.renderTilePane(c, t, 0)
 						ui.Box(c).Width(1).Background(ui.Hex("#334155"))
@@ -742,9 +776,6 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 					c.WriteClipboard(h.Address)
 				}
 			}
-			if m.Item("新建此主机终端").Chosen() {
-				v.openNewHostSession(h)
-			}
 			if h.IsEphemeral {
 				if m.Item("保存为主机配置...").Chosen() {
 					v.openCreateModal()
@@ -762,15 +793,6 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 			if m.Item("复制文件名").Chosen() {
 				c.WriteClipboard(tab.Editor.Name)
 			}
-			if tab.Session != nil && tab.Session.Host != nil {
-				if m.Item("打开所属主机终端").Chosen() {
-					v.openNewHostSession(tab.Session.Host)
-				}
-			}
-		}
-
-		if m.Item("复制标签名称").Chosen() {
-			c.WriteClipboard(tab.Title)
 		}
 		m.Separator()
 	}
@@ -784,11 +806,15 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 	}
 
 	// 4. 快速分屏布局切换
-	if m.Item("左右双 Tab 并列").Chosen() {
+	if m.Item("单视窗").Chosen() {
+		v.switchActivePaneToTab(index)
+		v.SetLayoutMode(LayoutSingle)
+	}
+	if m.Item("左右分屏").Chosen() {
 		v.switchActivePaneToTab(index)
 		v.SetLayoutMode(LayoutDualSplit)
 	}
-	if m.Item("四宫格布局").Chosen() {
+	if m.Item("四宫格分屏").Chosen() {
 		v.switchActivePaneToTab(index)
 		v.SetLayoutMode(LayoutQuadGrid)
 	}
@@ -845,7 +871,7 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 			ui.Text(c, tab.Title).FontSize(12).Bold().TextColor(textColor).SingleLine()
 			// 连接中或已断开状态徽记
 			if tab.Session.Connecting {
-				ui.Text(c, "连接中").FontSize(9.5).TextColor(t.Warning)
+				ui.Text(c, "连接中...").FontSize(9.5).TextColor(t.Warning)
 			} else if !tab.Session.Connected {
 				ui.Text(c, "已断开").FontSize(9.5).TextColor(t.Danger)
 			}
@@ -913,13 +939,10 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 // SetLayoutMode 一键切换工作区多窗格平铺布局模式
 func (v *AppView) SetLayoutMode(mode WorkspaceLayoutMode) {
 	v.layoutMode = mode
-	// 若用户当前处于概览页，切换平铺模式时自动切到终端页面，让用户直接看到终端平铺效果
-	if v.activeTabIndex == 0 && mode != LayoutSingle {
-		if len(v.tabs) > 1 {
-			v.activeTabIndex = 1
-		} else {
-			v.openNewLocalTerminal()
-		}
+	// 若用户当前处于概览页且已存在其他终端标签，切换平铺模式时自动切到终端页面，让用户直接看到终端平铺效果；
+	// 若仅有概览页，则仅记录布局模式，不自动创建本地终端
+	if v.activeTabIndex == 0 && mode != LayoutSingle && len(v.tabs) > 1 {
+		v.activeTabIndex = 1
 	}
 	v.rebalancePanes()
 }
@@ -1083,6 +1106,36 @@ func (v *AppView) rebalancePanes() {
 			used[assigned] = true
 		}
 	}
+
+	// 收集所有窗格中分配到的有效终端 Tab，并按其在标签栏中的先后顺序 (升序) 重新排列，
+	// 确保左/上窗格永远展示前面的标签，右/下窗格展示后面的标签，符合用户直觉
+	var assignedTabs []int
+	for p := 0; p < paneCount; p++ {
+		idx := v.paneTabIndices[p]
+		if idx >= 1 && idx < len(v.tabs) {
+			assignedTabs = append(assignedTabs, idx)
+		}
+	}
+	sort.Ints(assignedTabs)
+
+	// 将升序排序后的终端 Tab 重新赋予窗格，多余的窗格重置为 -1
+	for p := 0; p < paneCount; p++ {
+		if p < len(assignedTabs) {
+			v.paneTabIndices[p] = assignedTabs[p]
+		} else {
+			v.paneTabIndices[p] = -1
+		}
+	}
+
+	// 将当前激活窗格焦点同步定位到当前激活 Tab (v.activeTabIndex) 所在的窗格
+	newActivePane := 0
+	for p := 0; p < paneCount; p++ {
+		if v.paneTabIndices[p] == v.activeTabIndex {
+			newActivePane = p
+			break
+		}
+	}
+	v.activePaneIndex = newActivePane
 }
 
 // sanitizePanes 在 Tab 增减或重组后校验窗格状态 (确保概览 index 0 绝不混入窗格)
@@ -1146,11 +1199,11 @@ func (v *AppView) renderTabContent(c *ui.Context, t *ui.Theme, tabIndex int, onC
 func (v *AppView) renderLayoutSwitcher(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Height(28).AlignItems(ui.Center).Gap(1).Padding(2).Background(ui.Hex("#E2E8F0")).Radius(5).Children(func() {
 		// 单视窗全屏
-		v.renderLayoutBtn(c, t, LayoutSingle, IconLayoutSingle, "单终端视窗 (Alt+1)")
+		v.renderLayoutBtn(c, t, LayoutSingle, IconLayoutSingle, "单视窗 (Alt+1)")
 		// 左右双 Tab 并列
-		v.renderLayoutBtn(c, t, LayoutDualSplit, IconLayoutDual, "左右双终端平铺 (Alt+2)")
+		v.renderLayoutBtn(c, t, LayoutDualSplit, IconLayoutDual, "左右分屏 (Alt+2)")
 		// 四宫格 2x2 并列
-		v.renderLayoutBtn(c, t, LayoutQuadGrid, IconLayoutQuad, "四宫格终端平铺 (Alt+4)")
+		v.renderLayoutBtn(c, t, LayoutQuadGrid, IconLayoutQuad, "四宫格分屏 (Alt+4)")
 	})
 }
 
@@ -1180,9 +1233,9 @@ func (v *AppView) renderTilePane(c *ui.Context, t *ui.Theme, paneIndex int) {
 
 	paneBox := ui.Column(c).Grow(1).Shrink(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Background(ColTerminalBg)
 	if isActivePane {
-		paneBox.Border(1.5, t.Accent)
+		paneBox.Border(1, t.Accent)
 	} else {
-		paneBox.Border(1, ui.Hex("#334155"))
+		paneBox.Border(1, ui.Transparent)
 	}
 
 	onPaneFocus := func() {
@@ -1230,7 +1283,7 @@ func (v *AppView) renderEmptyPane(c *ui.Context, t *ui.Theme, paneIndex int) {
 					}
 				})
 			} else {
-				if ui.PrimaryButton(c, "+ 添加主机").Clicked() {
+				if ui.PrimaryButton(c, "+ 添加 SSH 主机").Clicked() {
 					v.openCreateModal()
 				}
 			}
@@ -1304,7 +1357,7 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 				})
 
 				if host.AuthType == model.AuthTypeLocal {
-					ui.Text(c, fmt.Sprintf("本地操作系统原生终端会话 (%s)", host.Description)).FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, fmt.Sprintf("本地终端 (%s)", host.Description)).FontSize(12).TextColor(t.TextMuted)
 				} else {
 					ui.Text(c, fmt.Sprintf("%s (%s:%d)", host.Description, host.Address, host.Port)).FontSize(12).TextColor(t.TextMuted)
 				}
@@ -1313,7 +1366,7 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 			ui.Spacer(c)
 
 			ui.Row(c).Gap(t.Space(2)).Children(func() {
-				if ui.Button(c, "编辑配置").Clicked() {
+				if ui.Button(c, "编辑").Clicked() {
 					v.openEditModal(host)
 				}
 				if host.AuthType != model.AuthTypeLocal {
@@ -1439,9 +1492,9 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &v.modalOpen, func() {
 		ui.Column(c).Width(480).Gap(t.Space(3.5)).Children(func() {
-			title := "添加主机连接"
+			title := "添加主机"
 			if v.formID != "" {
-				title = "编辑主机连接"
+				title = "编辑主机配置"
 			}
 			ui.Text(c, title).FontSize(16).Bold().TextColor(t.Text)
 			ui.Text(c, "配置 SSH 远程主机连接凭据，密码与秘钥将由 AES-256 本地加密").FontSize(11.5).TextColor(t.TextMuted)
@@ -1485,7 +1538,7 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 					localFg = t.Text
 				}
 				ui.Row(c).Grow(1).Height(26).Background(localBg).Radius(t.Radius - 2).Center().Children(func() {
-					ui.Text(c, "本地 Shell").FontSize(11).Bold().TextColor(localFg)
+					ui.Text(c, "本地终端").FontSize(11).Bold().TextColor(localFg)
 				}).OnClick(func() {
 					v.formAuthType = "local"
 					if v.formName == "" {
@@ -1495,36 +1548,36 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 			})
 
 			// 别名
-			ui.Text(c, "主机别名:").FontSize(11.5).Bold().TextColor(t.Text)
+			ui.Text(c, "主机别名").FontSize(11.5).Bold().TextColor(t.Text)
 			ui.TextInput(c, &v.formName)
 
 			if v.formAuthType != "local" {
 				// 地址与端口
 				ui.Row(c).Gap(t.Space(2)).Children(func() {
 					ui.Column(c).Grow(1).Children(func() {
-						ui.Text(c, "主机 IP / 域名:").FontSize(11.5).Bold().TextColor(t.Text)
+						ui.Text(c, "主机地址").FontSize(11.5).Bold().TextColor(t.Text)
 						ui.TextInput(c, &v.formAddress)
 					})
 					ui.Column(c).Width(100).Children(func() {
-						ui.Text(c, "端口:").FontSize(11.5).Bold().TextColor(t.Text)
+						ui.Text(c, "端口").FontSize(11.5).Bold().TextColor(t.Text)
 						ui.TextInput(c, &v.formPort)
 					})
 				})
 
 				// 用户名
-				ui.Text(c, "登录用户名:").FontSize(11.5).Bold().TextColor(t.Text)
+				ui.Text(c, "用户名").FontSize(11.5).Bold().TextColor(t.Text)
 				ui.TextInput(c, &v.formUsername)
 
 				if v.formAuthType == "password" {
-					ui.Text(c, "SSH 登录密码:").FontSize(11.5).Bold().TextColor(t.Text)
+					ui.Text(c, "密码").FontSize(11.5).Bold().TextColor(t.Text)
 					ui.TextInput(c, &v.formPassword)
 				} else {
-					ui.Text(c, "私钥路径:").FontSize(11.5).Bold().TextColor(t.Text)
+					ui.Text(c, "私钥路径").FontSize(11.5).Bold().TextColor(t.Text)
 					ui.TextInput(c, &v.formKeyPath).Placeholder("~/.ssh/id_rsa")
 				}
 			} else {
 				// 本地 Shell 类型分段单选
-				ui.Text(c, "Shell 类型:").FontSize(11.5).Bold().TextColor(t.Text)
+				ui.Text(c, "Shell 类型").FontSize(11.5).Bold().TextColor(t.Text)
 				ui.Row(c).Height(30).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
 					options := []struct {
 						id   string
@@ -1609,6 +1662,9 @@ func (v *AppView) saveRenameTab() {
 		}
 	}
 	v.renameModalOpen = false
+	if v.window != nil {
+		v.window.Invalidate()
+	}
 }
 
 // renderRenameModal 标签页重命名弹窗
@@ -1622,7 +1678,9 @@ func (v *AppView) renderRenameModal(c *ui.Context, t *ui.Theme) {
 
 			ui.Text(c, "输入自定义标签名称；留空或点击「恢复默认」可还原原始名称").FontSize(11.5).TextColor(t.TextMuted)
 
-			ui.TextInput(c, &v.renameInput).Placeholder("输入标签名称...")
+			ui.TextInput(c, &v.renameInput).Placeholder("输入标签名称...").OnSubmit(func() {
+				v.saveRenameTab()
+			})
 
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 				if ui.Button(c, "恢复默认").Clicked() {
@@ -1909,7 +1967,7 @@ func (v *AppView) openEditModal(h *model.Host) {
 // 保存表单
 func (v *AppView) saveHostForm() {
 	if strings.TrimSpace(v.formName) == "" {
-		v.formErrorMsg = "请输入主机显示别名"
+		v.formErrorMsg = "请输入主机别名"
 		return
 	}
 
@@ -2491,8 +2549,8 @@ func (v *AppView) confirmCloseSessionTab(s *TerminalSession) bool {
 			Type:          mygo.MessageWarning,
 			Title:         "关闭会话",
 			Message:       fmt.Sprintf("会话“%s”有关联文件尚未保存", s.Host.Name),
-			Detail:        fmt.Sprintf("文件 (%s) 存在未保存的修改，关闭会话将一并关闭并放弃这些改动。确定要关闭吗？", strings.Join(unsavedFiles, ", ")),
-			Buttons:       []string{"放弃改动并关闭", "取消"},
+			Detail:        fmt.Sprintf("文件 (%s) 存在未保存的修改，关闭会话将一并关闭并放弃这些修改。确定要关闭吗？", strings.Join(unsavedFiles, ", ")),
+			Buttons:       []string{"放弃修改并关闭", "取消"},
 			DefaultButton: 0,
 			CancelButton:  1,
 		})
