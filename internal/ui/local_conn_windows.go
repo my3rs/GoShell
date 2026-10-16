@@ -33,9 +33,58 @@ func shouldFallbackPipe() bool {
 	return procCreatePseudoConsole.Find() != nil
 }
 
-// startFallbackPipeTerminal 在不支持 ConPTY 的旧版 Windows 上，通过匿名管道和静默后台进程启动 cmd.exe
-func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
-	// 优先寻找 cmd.exe (Win10 1809 之前在管道模式下 cmd.exe 毫秒级秒启、最稳定)
+type shellConfig struct {
+	path        string
+	args        []string
+	isUTF8Shell bool
+	name        string
+}
+
+// findWindowsShell 自动探测系统最优终端 Shell：优先 BusyBox 虚拟 Bash，其次 Git Bash，最后降级 cmd.exe
+func findWindowsShell() shellConfig {
+	// 1. 优先检查当前程序同级目录下的 busybox.exe (便携免安装虚拟 Linux/Bash 终端)
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "busybox.exe")
+		if stat, err := os.Stat(candidate); err == nil && !stat.IsDir() {
+			return shellConfig{
+				path:        candidate,
+				args:        []string{candidate, "sh", "-l", "-i"},
+				isUTF8Shell: true,
+				name:        "BusyBox Bash",
+			}
+		}
+	}
+
+	// 2. 检查环境变量 PATH 中是否有 busybox.exe
+	if p, err := exec.LookPath("busybox.exe"); err == nil {
+		return shellConfig{
+			path:        p,
+			args:        []string{p, "sh", "-l", "-i"},
+			isUTF8Shell: true,
+			name:        "BusyBox Bash",
+		}
+	}
+
+	// 3. 检查系统是否安装了 Git for Windows 官方 Bash
+	gitCandidates := []string{
+		`C:\Program Files\Git\bin\bash.exe`,
+		`C:\Program Files (x86)\Git\bin\bash.exe`,
+	}
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		gitCandidates = append(gitCandidates, filepath.Join(localAppData, `Programs\Git\bin\bash.exe`))
+	}
+	for _, cand := range gitCandidates {
+		if stat, err := os.Stat(cand); err == nil && !stat.IsDir() {
+			return shellConfig{
+				path:        cand,
+				args:        []string{cand, "-l", "-i"},
+				isUTF8Shell: true,
+				name:        "Git Bash",
+			}
+		}
+	}
+
+	// 4. 降级使用 Windows 系统默认 cmd.exe
 	shellPath := os.Getenv("COMSPEC")
 	if shellPath == "" {
 		if p, err := exec.LookPath("cmd.exe"); err == nil {
@@ -46,6 +95,39 @@ func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
 	}
 	if shellPath == "" {
 		shellPath = "C:\\Windows\\System32\\cmd.exe"
+	}
+
+	args := []string{shellPath}
+	if strings.EqualFold(filepath.Base(shellPath), "powershell.exe") {
+		args = append(args, "-NoLogo")
+	}
+
+	return shellConfig{
+		path:        shellPath,
+		args:        args,
+		isUTF8Shell: false,
+		name:        "Command Prompt",
+	}
+}
+
+// startFallbackPipeTerminal 在不支持 ConPTY 的旧版 Windows 上，通过匿名管道和静默后台进程启动虚拟终端 Shell
+func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
+	shell := findWindowsShell()
+
+	if shell.isUTF8Shell {
+		_ = os.Setenv("BB_TERMINAL_MODE", "1")
+		_ = os.Setenv("BB_SKIP_ANSI_EMULATION", "2")
+		_ = os.Setenv("TERM", "xterm-256color")
+		_ = os.Setenv("LANG", "zh_CN.UTF-8")
+		_ = os.Setenv("LC_ALL", "zh_CN.UTF-8")
+		// 将程序所在目录加入 PATH，使得外部调用 busybox 内置命令如 ls/grep/cat 直接生效
+		if exe, err := os.Executable(); err == nil {
+			exeDir := filepath.Dir(exe)
+			currPath := os.Getenv("PATH")
+			if !strings.Contains(currPath, exeDir) {
+				_ = os.Setenv("PATH", exeDir+string(os.PathListSeparator)+currPath)
+			}
+		}
 	}
 
 	var sa syscall.SecurityAttributes
@@ -70,22 +152,15 @@ func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
 
 	var si syscall.StartupInfo
 	si.Cb = uint32(unsafe.Sizeof(si))
-	// STARTF_USESHOWWINDOW 配合 SW_HIDE，并在 CreateProcess 中指定 CREATE_NO_WINDOW，
-	// 彻底杜绝 Windows 为控制台子进程（cmd.exe）弹出一个独立的外部控制台黑窗口
 	si.Flags = syscall.STARTF_USESTDHANDLES | syscall.STARTF_USESHOWWINDOW
 	si.ShowWindow = syscall.SW_HIDE
 	si.StdInput = inR
 	si.StdOutput = outW
 	si.StdErr = outW
 
-	args := []string{shellPath}
-	if strings.EqualFold(filepath.Base(shellPath), "powershell.exe") {
-		args = append(args, "-NoLogo")
-	}
-
 	cmdlineStr := strings.Join(func() []string {
 		var escaped []string
-		for _, a := range args {
+		for _, a := range shell.args {
 			escaped = append(escaped, syscall.EscapeArg(a))
 		}
 		return escaped
@@ -112,7 +187,7 @@ func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
 	if err != nil {
 		syscall.CloseHandle(inW)
 		syscall.CloseHandle(outR)
-		return nil, fmt.Errorf("启动本地 Shell 失败 (%s): %w", shellPath, err)
+		return nil, fmt.Errorf("启动本地 Shell 失败 (%s): %w", shell.path, err)
 	}
 	syscall.CloseHandle(pi.Thread)
 
@@ -123,12 +198,13 @@ func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
 
 	pr, pw := io.Pipe()
 	conn := &pipeConn{
-		process: pi.Process,
-		in:      os.NewFile(uintptr(inW), "pipe-in"),
-		out:     os.NewFile(uintptr(outR), "pipe-out"),
-		pr:      pr,
-		pw:      pw,
-		oemCP:   oemCP,
+		process:     pi.Process,
+		in:          os.NewFile(uintptr(inW), "pipe-in"),
+		out:         os.NewFile(uintptr(outR), "pipe-out"),
+		pr:          pr,
+		pw:          pw,
+		oemCP:       oemCP,
+		isUTF8Shell: shell.isUTF8Shell,
 	}
 	go conn.readProcessOutputLoop()
 
@@ -136,15 +212,16 @@ func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
 }
 
 type pipeConn struct {
-	mu      sync.Mutex
-	process syscall.Handle
-	in      *os.File
-	out     *os.File
-	pr      *io.PipeReader
-	pw      *io.PipeWriter
-	oemCP   uint32
-	lineBuf []rune
-	closed  bool
+	mu          sync.Mutex
+	process     syscall.Handle
+	in          *os.File
+	out         *os.File
+	pr          *io.PipeReader
+	pw          *io.PipeWriter
+	oemCP       uint32
+	isUTF8Shell bool
+	lineBuf     []rune
+	closed      bool
 }
 
 // readProcessOutputLoop 在后台持续读取子进程输出，流式转码 GBK -> UTF-8 并写入管道供终端消费
@@ -238,10 +315,10 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 			c.lineBuf = c.lineBuf[:0]
 
 			var toWrite []byte
-			if c.oemCP != 0 && c.oemCP != 65001 {
-				toWrite = utf8ToCP(c.oemCP, []byte(cmdLine))
-			} else {
+			if c.isUTF8Shell || c.oemCP == 0 || c.oemCP == 65001 {
 				toWrite = []byte(cmdLine)
+			} else {
+				toWrite = utf8ToCP(c.oemCP, []byte(cmdLine))
 			}
 			if _, err := c.in.Write(toWrite); err != nil {
 				return 0, err

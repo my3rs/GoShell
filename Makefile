@@ -69,8 +69,11 @@ build-windows: ensure-winres
 		-ldflags="-H windowsgui -s -w" \
 		-o $(OUT_DIR)/$(APP_NAME).exe \
 		$(MAIN_SRC)
-	@echo "==> [3/3] 部署离线终端引擎 ghostty-vt.dll 到输出目录..."
+	@echo "==> [3/3] 部署离线终端引擎 ghostty-vt.dll 与 busybox.exe 到输出目录..."
 	@cp $(NATIVES_DIR)/windows-amd64/ghostty-vt.dll $(OUT_DIR)/ghostty-vt.dll
+	@if [ -f $(NATIVES_DIR)/windows-amd64/busybox.exe ]; then \
+		cp $(NATIVES_DIR)/windows-amd64/busybox.exe $(OUT_DIR)/busybox.exe; \
+	fi
 	@echo "==> 打包完成: $(OUT_DIR)/$(APP_NAME).exe (完全离线免依赖)"
 
 ## build-windows-arm64: 跨平台编译 Windows ARM64 程序
@@ -92,13 +95,16 @@ build-windows-arm64: ensure-winres
 		-o $(OUT_DIR)/$(APP_NAME)-arm64.exe \
 		$(MAIN_SRC)
 	@cp $(NATIVES_DIR)/windows-arm64/ghostty-vt.dll $(OUT_DIR)/ghostty-vt.dll
+	@if [ -f $(NATIVES_DIR)/windows-arm64/busybox.exe ]; then \
+		cp $(NATIVES_DIR)/windows-arm64/busybox.exe $(OUT_DIR)/busybox.exe; \
+	fi
 	@echo "==> 打包完成: $(OUT_DIR)/$(APP_NAME)-arm64.exe"
 
 ## package-windows: 编译 Windows 并打包为完全离线的 zip 压缩包
 package-windows: build-windows
-	@echo "==> 打包离线 zip 压缩包 (包含 GoShell.exe 与 ghostty-vt.dll)..."
+	@echo "==> 打包离线 zip 压缩包 (包含 GoShell.exe, ghostty-vt.dll 与 busybox.exe)..."
 	@cd $(OUT_DIR) && rm -f $(APP_NAME)-v$(VERSION)-windows-amd64.zip && \
-	zip -9 $(APP_NAME)-v$(VERSION)-windows-amd64.zip $(APP_NAME).exe ghostty-vt.dll
+	zip -9 $(APP_NAME)-v$(VERSION)-windows-amd64.zip $(APP_NAME).exe ghostty-vt.dll busybox.exe
 	@echo "==> 离线发布包已就绪: $(OUT_DIR)/$(APP_NAME)-v$(VERSION)-windows-amd64.zip"
 
 ## build-darwin: 编译 macOS 原生版本

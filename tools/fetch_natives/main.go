@@ -50,10 +50,22 @@ var targets = []TargetFile{
 		SHA256: "53e8e2dd979702e8f2c48107af19be5a76efc2e88eb7cf1097218e899665da41",
 	},
 	{
+		Target: "windows-amd64",
+		Name:   "busybox.exe",
+		URL:    "https://frippery.org/files/busybox/busybox64.exe",
+		SHA256: "07bb1e5b095b00d68a695481f9240879f33c5724b40aa2308f999d54ed78f075",
+	},
+	{
 		Target: "windows-arm64",
 		Name:   "ghostty-vt.dll",
 		URL:    "https://github.com/egoist/mygo/releases/download/libghostty-vt-befcdfd2c3a1/libghostty-vt-windows-arm64.dll",
 		SHA256: "de56a362f12cce8be38e883ffc8aec90a890e0574eb73aac6e833a60fda26064",
+	},
+	{
+		Target: "windows-arm64",
+		Name:   "busybox.exe",
+		URL:    "https://frippery.org/files/busybox/busybox-w64a-FRP-6075-g169694ebd.exe",
+		SHA256: "e67f873d19d58c535cc9f0c4965ffd622e19b7bab87e3da89cb2185fb54464d7",
 	},
 }
 
