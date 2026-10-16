@@ -170,11 +170,16 @@ func (s *TerminalSession) Start() {
 				},
 			}
 
+			shellType := ""
+			if s.Host != nil {
+				shellType = s.Host.ShellType
+			}
+
 			// 在不支持 ConPTY 的旧版 Windows（如 Windows 10 1709 / Win7 / Win8）上，
 			// 自动通过管道模式以静默方式启动虚拟终端 Shell，并通过 Conn 接口直接对接 Ghostty VT，
 			// 彻底避免 ConPTY 检查失败与外部黑框弹窗
 			if shouldFallbackPipe() {
-				conn, err := startFallbackPipeTerminal(home, func(line string) bool {
+				conn, err := startFallbackPipeTerminal(home, shellType, func(line string) bool {
 					if host, ok := ParseSSHCommand(line); ok {
 						if s.OnSSHIntercept != nil {
 							s.OnSSHIntercept(host)
@@ -192,6 +197,12 @@ func (s *TerminalSession) Start() {
 					return
 				}
 				opts.Conn = conn
+			} else if runtime.GOOS == "windows" && shellType != "" && shellType != "auto" {
+				// 支持 ConPTY 的新版 Windows 模式：若用户显式指定了 Shell 类型，配置给 Command
+				conf := findWindowsShell(shellType)
+				if len(conf.args) > 0 {
+					opts.Command = conf.args
+				}
 			}
 
 			term, err := terminal.New(opts)

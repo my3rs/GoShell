@@ -9,7 +9,19 @@ func shouldFallbackPipe() bool {
 	return false
 }
 
+type shellConfig struct {
+	path        string
+	args        []string
+	isUTF8Shell bool
+	name        string
+}
+
 // startFallbackPipeTerminal 非 Windows 平台占位
-func startFallbackPipeTerminal(dir string, onIntercept func(line string) bool) (io.ReadWriteCloser, error) {
+func startFallbackPipeTerminal(dir string, shellType string, onIntercept func(line string) bool) (io.ReadWriteCloser, error) {
 	return nil, nil
+}
+
+// findWindowsShell 非 Windows 平台占位
+func findWindowsShell(shellType string) shellConfig {
+	return shellConfig{}
 }

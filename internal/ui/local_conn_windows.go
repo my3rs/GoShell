@@ -43,9 +43,13 @@ type shellConfig struct {
 }
 
 // findWindowsShell 自动探测系统最优终端 Shell：优先遵循用户显式指定，其次探测 BusyBox 虚拟 Bash、Git Bash，最后降级 cmd.exe
-func findWindowsShell() shellConfig {
-	// 0. 支持用户通过环境变量显式指定 (如 GOSHELL_SHELL=cmd / powershell / bash)
-	if preferred := strings.TrimSpace(os.Getenv("GOSHELL_SHELL")); preferred != "" {
+func findWindowsShell(targetShell string) shellConfig {
+	// 0. 支持用户显式传入参数或环境变量 (如 targetShell 或 GOSHELL_SHELL=cmd / powershell / busybox)
+	preferred := strings.TrimSpace(targetShell)
+	if preferred == "" || preferred == "auto" {
+		preferred = strings.TrimSpace(os.Getenv("GOSHELL_SHELL"))
+	}
+	if preferred != "" && preferred != "auto" {
 		if strings.EqualFold(preferred, "cmd") || strings.EqualFold(preferred, "cmd.exe") {
 			cmdPath := os.Getenv("COMSPEC")
 			if cmdPath == "" {
@@ -68,6 +72,16 @@ func findWindowsShell() shellConfig {
 				args:        []string{psPath, "-NoLogo"},
 				isUTF8Shell: false,
 				name:        "PowerShell",
+			}
+		}
+		if strings.EqualFold(preferred, "busybox") || strings.EqualFold(preferred, "busybox.exe") || strings.EqualFold(preferred, "bash") || strings.EqualFold(preferred, "sh") {
+			if p, err := natives.EnsureBusybox(); err == nil && p != "" {
+				return shellConfig{
+					path:        p,
+					args:        []string{p, "sh", "-l", "-i"},
+					isUTF8Shell: true,
+					name:        "BusyBox Bash",
+				}
 			}
 		}
 	}
@@ -138,8 +152,8 @@ func findWindowsShell() shellConfig {
 }
 
 // startFallbackPipeTerminal 在不支持 ConPTY 的旧版 Windows 上，通过匿名管道和静默后台进程启动虚拟终端 Shell
-func startFallbackPipeTerminal(dir string, onIntercept func(line string) bool) (io.ReadWriteCloser, error) {
-	shell := findWindowsShell()
+func startFallbackPipeTerminal(dir string, shellType string, onIntercept func(line string) bool) (io.ReadWriteCloser, error) {
+	shell := findWindowsShell(shellType)
 
 	if shell.isUTF8Shell {
 		_ = os.Setenv("BB_TERMINAL_MODE", "1")
@@ -223,6 +237,13 @@ func startFallbackPipeTerminal(dir string, onIntercept func(line string) bool) (
 		oemCP = uint32(r)
 	}
 
+	currentDir := dir
+	if currentDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			currentDir = home
+		}
+	}
+
 	pr, pw := io.Pipe()
 	conn := &pipeConn{
 		process:     pi.Process,
@@ -233,6 +254,7 @@ func startFallbackPipeTerminal(dir string, onIntercept func(line string) bool) (
 		oemCP:       oemCP,
 		isUTF8Shell: shell.isUTF8Shell,
 		onIntercept: onIntercept,
+		workDir:     currentDir,
 	}
 	go conn.readProcessOutputLoop()
 
@@ -252,6 +274,8 @@ type pipeConn struct {
 	onIntercept func(line string) bool
 	closed      bool
 	normalizer  crlfNormalizer
+	workDir     string
+	lastPrompt  string
 }
 
 // readProcessOutputLoop 在后台持续读取子进程输出，流式转码 GBK -> UTF-8 并写入管道供终端消费
@@ -293,6 +317,7 @@ func (c *pipeConn) readProcessOutputLoop() {
 
 			if len(outBytes) > 0 {
 				normalized := c.normalizer.Normalize(outBytes)
+				c.recordPrompt(normalized)
 				if _, werr := c.pw.Write(normalized); werr != nil {
 					break
 				}
@@ -303,11 +328,52 @@ func (c *pipeConn) readProcessOutputLoop() {
 			if len(pending) > 0 && c.oemCP != 0 && c.oemCP != 65001 {
 				outBytes := cpToUTF8(c.oemCP, pending)
 				normalized := c.normalizer.Normalize(outBytes)
+				c.recordPrompt(normalized)
 				_, _ = c.pw.Write(normalized)
 			}
 			_ = c.pw.CloseWithError(err)
 			break
 		}
+	}
+}
+
+func (c *pipeConn) recordPrompt(b []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	str := string(b)
+	lastIdx := strings.LastIndex(str, "\n")
+	if lastIdx >= 0 {
+		c.lastPrompt = str[lastIdx+1:]
+	} else {
+		c.lastPrompt += str
+	}
+}
+
+func (c *pipeConn) handleCD(cmdLine string) {
+	trimmed := strings.TrimSpace(cmdLine)
+	if !strings.HasPrefix(trimmed, "cd") {
+		return
+	}
+	if len(trimmed) > 2 && trimmed[2] != ' ' && trimmed[2] != '\t' {
+		return
+	}
+	target := strings.TrimSpace(trimmed[2:])
+	if target == "" || target == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			c.workDir = home
+		}
+		return
+	}
+	target = strings.Trim(target, "\"'")
+	if filepath.IsAbs(target) {
+		if stat, err := os.Stat(target); err == nil && stat.IsDir() {
+			c.workDir = target
+		}
+		return
+	}
+	newDir := filepath.Join(c.workDir, target)
+	if stat, err := os.Stat(newDir); err == nil && stat.IsDir() {
+		c.workDir = filepath.Clean(newDir)
 	}
 }
 
@@ -334,6 +400,34 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 		}
 
 		switch r {
+		case '\t':
+			// 触发智能 Tab 自动补全
+			res := Autocomplete(c.lineBuf, c.workDir)
+			if !res.HasMatch {
+				i++
+				continue
+			}
+			if res.IsExactMatch {
+				// 单项精确匹配：直接在当前行补齐
+				c.lineBuf = res.NewLine
+				_, _ = c.pw.Write([]byte(string(res.AddedRunes)))
+			} else {
+				// 多项匹配：先补齐最长公共前缀（若有）
+				if len(res.AddedRunes) > 0 {
+					c.lineBuf = res.NewLine
+					_, _ = c.pw.Write([]byte(string(res.AddedRunes)))
+				}
+				// 换行展示所有候选并重绘提示符行
+				if len(res.Suggestions) > 0 {
+					prompt := c.lastPrompt
+					if prompt == "" {
+						prompt = "~ # "
+					}
+					formatted := FormatSuggestions(res.Suggestions)
+					_, _ = c.pw.Write([]byte("\r\n" + formatted + "\r\n" + prompt + string(c.lineBuf)))
+				}
+			}
+
 		case '\r', '\n':
 			// 跳过紧随 \r 后的 \n，避免双重换行
 			if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
@@ -344,6 +438,8 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 
 			cmdLine := string(c.lineBuf)
 			c.lineBuf = c.lineBuf[:0]
+			c.lastPrompt = "" // 重置上一轮提示符
+			c.handleCD(cmdLine)
 
 			// 2. 检查是否拦截特殊指令 (例如直接输入 ssh 命令)
 			if c.onIntercept != nil && c.onIntercept(cmdLine) {
@@ -383,8 +479,8 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 			_, _ = c.in.Write([]byte("\x03\r\n"))
 
 		default:
-			// 普通可打印字符、中文、空格、Tab等
-			if r >= 0x20 || r == '\t' {
+			// 普通可打印字符、中文、空格等 (Tab 已在上方独立处理)
+			if r >= 0x20 {
 				c.lineBuf = append(c.lineBuf, r)
 				// 实时本地回显到终端屏幕
 				_, _ = c.pw.Write([]byte(string(r)))

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 
 	"goshell/internal/app"
 	"goshell/internal/core/model"
+	"goshell/internal/core/security"
+	"goshell/internal/core/storage"
 )
 
 func TestWorkSummary_HasActiveWork(t *testing.T) {
@@ -576,6 +579,86 @@ func TestAppView_QuickConnect(t *testing.T) {
 	}
 	if v.quickConnectHost != "example.com" || v.quickConnectPort != "8022" || v.quickConnectUser != "deploy" {
 		t.Errorf("openQuickConnectWithHost mismatch: host=%s, port=%s, user=%s", v.quickConnectHost, v.quickConnectPort, v.quickConnectUser)
+	}
+}
+
+func TestAppView_LocalShellTypeSwitching(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	cipher, err := security.NewCipherService("")
+	if err != nil {
+		t.Fatalf("failed to init cipher: %v", err)
+	}
+	store, err := storage.Open(dbPath, cipher)
+	if err != nil {
+		t.Fatalf("failed to open storage: %v", err)
+	}
+	defer store.Close()
+
+	localHost := &model.Host{
+		ID:       "local-1",
+		Name:     "本地终端",
+		AuthType: model.AuthTypeLocal,
+	}
+	if err := store.SaveHost(localHost); err != nil {
+		t.Fatalf("failed to save local host: %v", err)
+	}
+
+	testApp := &app.App{
+		Store: store,
+		Hosts: []*model.Host{localHost},
+	}
+	v := NewAppView(testApp)
+
+	// 1. 打开编辑弹窗验证默认值
+	v.openEditModal(localHost)
+	if !v.modalOpen {
+		t.Fatalf("expected modalOpen = true")
+	}
+	if v.formShellType != "auto" {
+		t.Errorf("expected default formShellType to be 'auto', got %q", v.formShellType)
+	}
+
+	// 3. 切换为 BusyBox 并保存
+	v.formShellType = "busybox"
+	v.saveHostForm()
+	if v.modalOpen {
+		t.Errorf("expected modalOpen to close after save")
+	}
+
+	// 重新载入验证
+	savedHost, err := store.GetHost(localHost.ID)
+	if err != nil {
+		t.Fatalf("failed to reload host: %v", err)
+	}
+	if savedHost.ShellType != "busybox" {
+		t.Errorf("savedHost.ShellType = %q, want busybox", savedHost.ShellType)
+	}
+
+	// 4. 再次切换为 PowerShell 并保存
+	v.openEditModal(savedHost)
+	v.formShellType = "powershell"
+	v.saveHostForm()
+
+	savedHost2, err := store.GetHost(localHost.ID)
+	if err != nil {
+		t.Fatalf("failed to reload host: %v", err)
+	}
+	if savedHost2.ShellType != "powershell" {
+		t.Errorf("savedHost2.ShellType = %q, want powershell", savedHost2.ShellType)
+	}
+
+	// 5. 切换回自动模式（auto 存为空）
+	v.openEditModal(savedHost2)
+	v.formShellType = "auto"
+	v.saveHostForm()
+
+	savedHost3, err := store.GetHost(localHost.ID)
+	if err != nil {
+		t.Fatalf("failed to reload host: %v", err)
+	}
+	if savedHost3.ShellType != "" {
+		t.Errorf("savedHost3.ShellType = %q, want empty (auto)", savedHost3.ShellType)
 	}
 }
 

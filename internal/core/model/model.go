@@ -39,6 +39,7 @@ type Host struct {
 	JumpHostID  string    `json:"jump_host_id"`// 跳板机 Host ID（链式跳板）
 	Description string    `json:"description"` // 备注信息
 	ColorTag    string    `json:"color_tag"`   // 标签颜色 (用于终端标签和侧边栏标识)
+	ShellType   string    `json:"shell_type,omitempty"` // 本地终端指定的 Shell 类型 (auto/busybox/powershell/cmd)
 	IsEphemeral bool      `json:"is_ephemeral,omitempty"` // 临时会话，不持久化保存到数据库
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

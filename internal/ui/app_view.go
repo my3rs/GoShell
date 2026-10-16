@@ -81,10 +81,11 @@ type AppView struct {
 	formPort     string
 	formUsername string
 	formAuthType string // "password", "key", "local"
-	formPassword string
-	formKeyPath  string
-	formGroupID  string
-	formErrorMsg string
+	formPassword  string
+	formKeyPath   string
+	formShellType string // "auto", "busybox", "powershell", "cmd"
+	formGroupID   string
+	formErrorMsg  string
 
 	// 宿主原生窗口引用与退出拦截状态
 	window        *mygo.Window
@@ -1521,6 +1522,35 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "私钥绝对路径 (如 ~/.ssh/id_rsa):").FontSize(11.5).Bold().TextColor(t.Text)
 					ui.TextInput(c, &v.formKeyPath)
 				}
+			} else {
+				// 本地 Shell 类型分段单选
+				ui.Text(c, "Shell 类型:").FontSize(11.5).Bold().TextColor(t.Text)
+				ui.Row(c).Height(30).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
+					options := []struct {
+						id   string
+						name string
+					}{
+						{"auto", "自动探测"},
+						{"busybox", "BusyBox"},
+						{"powershell", "PowerShell"},
+						{"cmd", "CMD"},
+					}
+					for _, opt := range options {
+						bg := ui.Hex("#E2E8F0")
+						fg := ColSidebarText
+						if v.formShellType == opt.id || (v.formShellType == "" && opt.id == "auto") {
+							bg = t.Surface
+							fg = t.Text
+						}
+						targetID := opt.id
+						ui.Row(c).Grow(1).Height(26).Background(bg).Radius(t.Radius - 2).Center().Children(func() {
+							ui.Text(c, opt.name).FontSize(11).Bold().TextColor(fg)
+						}).OnClick(func() {
+							v.formShellType = targetID
+						})
+					}
+				})
+				ui.Text(c, "提示: 自动模式优先使用内置 BusyBox 虚拟 Bash，若未检测到则降级原生控制台").FontSize(11).TextColor(t.TextMuted)
 			}
 
 			// 底部操作按钮
@@ -1849,6 +1879,7 @@ func (v *AppView) openCreateModal() {
 	v.formAuthType = "password"
 	v.formPassword = ""
 	v.formKeyPath = ""
+	v.formShellType = "auto"
 	v.formErrorMsg = ""
 	if len(v.app.Groups) > 0 {
 		v.formGroupID = v.app.Groups[0].ID
@@ -1866,6 +1897,10 @@ func (v *AppView) openEditModal(h *model.Host) {
 	v.formAuthType = string(h.AuthType)
 	v.formPassword = h.Password
 	v.formKeyPath = h.KeyPath
+	v.formShellType = h.ShellType
+	if v.formShellType == "" {
+		v.formShellType = "auto"
+	}
 	v.formGroupID = h.GroupID
 	v.formErrorMsg = ""
 	v.modalOpen = true
@@ -1882,9 +1917,13 @@ func (v *AppView) saveHostForm() {
 	address := strings.TrimSpace(v.formAddress)
 	port := 22
 
+	shellType := ""
 	if authType == model.AuthTypeLocal {
 		address = "localhost"
 		port = 0
+		if v.formShellType != "auto" {
+			shellType = strings.TrimSpace(v.formShellType)
+		}
 	} else {
 		if address == "" {
 			v.formErrorMsg = "请输入主机 IP 或域名"
@@ -1908,6 +1947,7 @@ func (v *AppView) saveHostForm() {
 		AuthType:    authType,
 		Password:    v.formPassword,
 		KeyPath:     strings.TrimSpace(v.formKeyPath),
+		ShellType:   shellType,
 		Description: "自建主机连接",
 		ColorTag:    "#0366D6",
 	}

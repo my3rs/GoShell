@@ -163,3 +163,16 @@ func TestLocalConn_SkipEscapeSequence(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalConn_FindWindowsShell(t *testing.T) {
+	// 验证各平台下 findWindowsShell 均能安全调用
+	confCmd := findWindowsShell("cmd")
+	confPS := findWindowsShell("powershell")
+	confBB := findWindowsShell("busybox")
+	confAuto := findWindowsShell("auto")
+	_ = confCmd
+	_ = confPS
+	_ = confBB
+	_ = confAuto
+}
+
