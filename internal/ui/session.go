@@ -135,7 +135,7 @@ func (s *TerminalSession) Start() {
 		s.PathInput = home
 
 		go func() {
-			term, err := terminal.New(terminal.Options{
+			opts := terminal.Options{
 				Dir: home,
 				Font: terminal.Font{
 					Family: fonts.FallbackChain,
@@ -165,8 +165,29 @@ func (s *TerminalSession) Start() {
 					s.mu.Unlock()
 					s.notifyUpdate()
 				},
-			})
+			}
+
+			// 在不支持 ConPTY 的旧版 Windows（如 Windows 10 1709 / Win7 / Win8）上，
+			// 自动通过管道模式以静默方式启动 cmd.exe，并通过 Conn 接口直接对接 Ghostty VT，
+			// 彻底避免 ConPTY 检查失败与外部黑框弹窗
+			if shouldFallbackPipe() {
+				conn, err := startFallbackPipeTerminal(home)
+				if err != nil {
+					s.mu.Lock()
+					s.Connecting = false
+					s.ErrorMsg = fmt.Sprintf("启动本地终端失败: %v", err)
+					s.mu.Unlock()
+					s.notifyUpdate()
+					return
+				}
+				opts.Conn = conn
+			}
+
+			term, err := terminal.New(opts)
 			if err != nil {
+				if opts.Conn != nil {
+					_ = opts.Conn.Close()
+				}
 				s.mu.Lock()
 				s.Connecting = false
 				s.ErrorMsg = fmt.Sprintf("启动终端引擎失败: %v", err)

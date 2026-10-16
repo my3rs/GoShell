@@ -1,0 +1,91 @@
+package ui
+
+import (
+	"bytes"
+	"testing"
+)
+
+func TestLocalConn_NormalizeCRLF(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []byte
+		want []byte
+	}{
+		{"empty", []byte{}, []byte{}},
+		{"ascii without newline", []byte("hello world"), []byte("hello world")},
+		{"already CRLF", []byte("hello\r\nworld\r\n"), []byte("hello\r\nworld\r\n")},
+		{"standalone CR", []byte("dir\r"), []byte("dir\r\n")},
+		{"standalone LF", []byte("dir\n"), []byte("dir\r\n")},
+		{"multiple standalone CR", []byte("a\rb\rc\r"), []byte("a\r\nb\r\nc\r\n")},
+		{"multiple standalone LF", []byte("a\nb\nc\n"), []byte("a\r\nb\r\nc\r\n")},
+		{"mixed CR, LF and CRLF", []byte("a\r\nb\rc\nd\r\n"), []byte("a\r\nb\r\nc\r\nd\r\n")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeCRLF(tt.in)
+			if !bytes.Equal(got, tt.want) {
+				t.Errorf("normalizeCRLF(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLocalConn_IsUTF8(t *testing.T) {
+	tests := []struct {
+		name           string
+		in             []byte
+		wantValid      bool
+		wantIncomplete int
+	}{
+		{"pure ascii", []byte("hello world"), true, 0},
+		{"valid full utf-8 chinese", []byte("你好世界"), true, 0},
+		{"incomplete utf-8 1-byte cut", []byte("你好")[:len([]byte("你好"))-1], true, 2},
+		{"incomplete utf-8 2-byte cut", []byte("你好")[:len([]byte("你好"))-2], true, 1},
+		{"invalid utf-8 (gbk chinese)", []byte{0xc4, 0xe3, 0xba, 0xc3}, false, 0},
+		{"invalid utf-8 (gbk banner)", []byte{0xb0, 0xe6, 0xc8, 0xa8}, false, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			valid, incomplete := isUTF8(tt.in)
+			if valid != tt.wantValid || incomplete != tt.wantIncomplete {
+				t.Errorf("isUTF8(%q) = (%v, %d), want (%v, %d)", tt.in, valid, incomplete, tt.wantValid, tt.wantIncomplete)
+			}
+		})
+	}
+}
+
+func TestLocalConn_GBKIncompleteTail(t *testing.T) {
+	tests := []struct {
+		name           string
+		in             []byte
+		wantIncomplete int
+	}{
+		{"empty", []byte{}, 0},
+		{"pure ascii", []byte("hello"), 0},
+		{"complete gbk pair", []byte{0xc4, 0xe3}, 0},
+		{"complete gbk two pairs", []byte{0xc4, 0xe3, 0xba, 0xc3}, 0},
+		{"incomplete solitary lead byte", []byte{0xc4, 0xe3, 0xba}, 1},
+		{"solitary single lead byte", []byte{0xc4}, 1},
+		{"pair with low trail byte", []byte{0x81, 0x40}, 0},
+		{"pair with low trail byte plus solitary lead", []byte{0x81, 0x40, 0xc4}, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gbkIncompleteTail(tt.in)
+			if got != tt.wantIncomplete {
+				t.Errorf("gbkIncompleteTail(%q) = %d, want %d", tt.in, got, tt.wantIncomplete)
+			}
+		})
+	}
+}
+
+func TestLocalConn_ShouldFallbackPipeNonWindows(t *testing.T) {
+	// On macOS/Linux, shouldFallbackPipe() should always return false
+	got := shouldFallbackPipe()
+	if got {
+		t.Errorf("shouldFallbackPipe() on non-windows = true, want false")
+	}
+}
