@@ -42,8 +42,36 @@ type shellConfig struct {
 	name        string
 }
 
-// findWindowsShell 自动探测系统最优终端 Shell：优先 BusyBox 虚拟 Bash，其次 Git Bash，最后降级 cmd.exe
+// findWindowsShell 自动探测系统最优终端 Shell：优先遵循用户显式指定，其次探测 BusyBox 虚拟 Bash、Git Bash，最后降级 cmd.exe
 func findWindowsShell() shellConfig {
+	// 0. 支持用户通过环境变量显式指定 (如 GOSHELL_SHELL=cmd / powershell / bash)
+	if preferred := strings.TrimSpace(os.Getenv("GOSHELL_SHELL")); preferred != "" {
+		if strings.EqualFold(preferred, "cmd") || strings.EqualFold(preferred, "cmd.exe") {
+			cmdPath := os.Getenv("COMSPEC")
+			if cmdPath == "" {
+				cmdPath = "C:\\Windows\\System32\\cmd.exe"
+			}
+			return shellConfig{
+				path:        cmdPath,
+				args:        []string{cmdPath},
+				isUTF8Shell: false,
+				name:        "Command Prompt",
+			}
+		}
+		if strings.EqualFold(preferred, "powershell") || strings.EqualFold(preferred, "powershell.exe") {
+			psPath := "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+			if p, err := exec.LookPath("powershell.exe"); err == nil {
+				psPath = p
+			}
+			return shellConfig{
+				path:        psPath,
+				args:        []string{psPath, "-NoLogo"},
+				isUTF8Shell: false,
+				name:        "PowerShell",
+			}
+		}
+	}
+
 	// 1. 优先使用内置或同级 BusyBox (支持单文件自动释放与绿色便携运行)
 	if p, err := natives.EnsureBusybox(); err == nil && p != "" {
 		return shellConfig{
