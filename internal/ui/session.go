@@ -57,6 +57,9 @@ type TerminalSession struct {
 
 	// UI 界面重绘通知回调
 	OnUpdate func()
+
+	// 本地终端拦截 SSH 命令回调 (用于在终端中输入 ssh 指令时自动唤起原生连接)
+	OnSSHIntercept func(target *model.Host)
 }
 
 // notifyUpdate 通知主界面重新绘制（无锁安全调用）
@@ -168,10 +171,18 @@ func (s *TerminalSession) Start() {
 			}
 
 			// 在不支持 ConPTY 的旧版 Windows（如 Windows 10 1709 / Win7 / Win8）上，
-			// 自动通过管道模式以静默方式启动 cmd.exe，并通过 Conn 接口直接对接 Ghostty VT，
+			// 自动通过管道模式以静默方式启动虚拟终端 Shell，并通过 Conn 接口直接对接 Ghostty VT，
 			// 彻底避免 ConPTY 检查失败与外部黑框弹窗
 			if shouldFallbackPipe() {
-				conn, err := startFallbackPipeTerminal(home)
+				conn, err := startFallbackPipeTerminal(home, func(line string) bool {
+					if host, ok := ParseSSHCommand(line); ok {
+						if s.OnSSHIntercept != nil {
+							s.OnSSHIntercept(host)
+							return true
+						}
+					}
+					return false
+				})
 				if err != nil {
 					s.mu.Lock()
 					s.Connecting = false

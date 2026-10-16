@@ -98,6 +98,15 @@ type AppView struct {
 
 	// 关于弹窗状态
 	aboutModalOpen bool
+
+	// 快速连接（临时 SSH 会话）弹窗状态
+	quickConnectModalOpen bool
+	quickConnectTarget    string // 原始输入或一键粘贴内容 (如 root@1.2.3.4:22 或 ssh root@1.2.3.4)
+	quickConnectHost      string // 主机 IP 或域名
+	quickConnectPort      string // 端口
+	quickConnectUser      string // 用户名
+	quickConnectPassword  string // 密码
+	quickConnectErrorMsg  string // 错误信息
 }
 
 // NewAppView 初始化主窗口 UI 状态
@@ -164,6 +173,11 @@ func (v *AppView) View(c *ui.Context) {
 	// 5. 关于 GoShell 弹窗 (注明 Ghostty 与 MyGo 开源引用)
 	if v.aboutModalOpen {
 		v.renderAboutModal(c, t)
+	}
+
+	// 6. 快速连接（临时 SSH 会话）弹窗
+	if v.quickConnectModalOpen {
+		v.renderQuickConnectModal(c, t)
 	}
 }
 
@@ -589,6 +603,9 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			})
 			btnNew.Tooltip("新建终端或主机连接")
 			btnNew.Menu(func(m *ui.Menu) {
+				if m.Item("快速连接").Chosen() {
+					v.openQuickConnectModal()
+				}
 				if m.Item("新建 SSH 主机...").Chosen() {
 					v.openCreateModal()
 				}
@@ -726,6 +743,16 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 			}
 			if m.Item("新建此主机终端 (新Tab)").Chosen() {
 				v.openNewHostSession(h)
+			}
+			if h.IsEphemeral {
+				if m.Item("保存为主机配置...").Chosen() {
+					v.openCreateModal()
+					v.formName = h.Address
+					v.formAddress = h.Address
+					v.formPort = strconv.Itoa(h.Port)
+					v.formUsername = h.Username
+					v.formPassword = h.Password
+				}
 			}
 		} else if tab.Type == TabTypeEditor && tab.Editor != nil {
 			if m.Item("复制文件完整路径").Chosen() {
@@ -1223,9 +1250,14 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 
 				ui.Spacer(c)
 
-				if ui.PrimaryButton(c, "+ 添加 SSH 主机").Clicked() {
-					v.openCreateModal()
-				}
+				ui.Row(c).Gap(t.Space(2)).Children(func() {
+					if ui.Button(c, "快速连接").Clicked() {
+						v.openQuickConnectModal()
+					}
+					if ui.PrimaryButton(c, "+ 添加 SSH 主机").Clicked() {
+						v.openCreateModal()
+					}
+				})
 			})
 
 			// 顶栏下方的横线分隔
@@ -1625,6 +1657,188 @@ func (v *AppView) renderAboutModal(c *ui.Context, t *ui.Theme) {
 	})
 }
 
+// 打开快速连接弹窗
+func (v *AppView) openQuickConnectModal() {
+	v.quickConnectTarget = ""
+	v.quickConnectHost = ""
+	v.quickConnectPort = "22"
+	v.quickConnectUser = "root"
+	v.quickConnectPassword = ""
+	v.quickConnectErrorMsg = ""
+	v.quickConnectModalOpen = true
+}
+
+// 基于已有解析好的主机打开快速连接弹窗
+func (v *AppView) openQuickConnectWithHost(h *model.Host) {
+	v.quickConnectTarget = h.Address
+	v.quickConnectHost = h.Address
+	v.quickConnectPort = strconv.Itoa(h.Port)
+	if h.Port <= 0 {
+		v.quickConnectPort = "22"
+	}
+	v.quickConnectUser = h.Username
+	if v.quickConnectUser == "" {
+		v.quickConnectUser = "root"
+	}
+	v.quickConnectPassword = h.Password
+	v.quickConnectErrorMsg = ""
+	v.quickConnectModalOpen = true
+}
+
+// 根据用户在目标框输入的快捷命令 (如 root@192.168.1.1:22 或 ssh -p 2222 root@1.2.3.4) 自动同步拆解各字段
+func (v *AppView) syncQuickConnectFieldsFromTarget() {
+	raw := strings.TrimSpace(v.quickConnectTarget)
+	if raw == "" {
+		return
+	}
+	if h, ok := ParseSSHCommand(raw); ok {
+		if h.Address != "" {
+			v.quickConnectHost = h.Address
+		}
+		if h.Username != "" {
+			v.quickConnectUser = h.Username
+		}
+		if h.Port > 0 {
+			v.quickConnectPort = strconv.Itoa(h.Port)
+		}
+		if h.Password != "" {
+			v.quickConnectPassword = h.Password
+		}
+		return
+	}
+
+	// 尝试作为直接的目标字符串解析：[user[:pwd]@]host[:port]
+	target := raw
+	if atIdx := strings.Index(target, "@"); atIdx != -1 {
+		userInfo := target[:atIdx]
+		target = target[atIdx+1:]
+		if colonIdx := strings.Index(userInfo, ":"); colonIdx != -1 {
+			v.quickConnectUser = userInfo[:colonIdx]
+			v.quickConnectPassword = userInfo[colonIdx+1:]
+		} else {
+			v.quickConnectUser = userInfo
+		}
+	}
+	if colonIdx := strings.LastIndex(target, ":"); colonIdx != -1 {
+		hostPart := target[:colonIdx]
+		portPart := target[colonIdx+1:]
+		if p, err := strconv.Atoi(portPart); err == nil && p > 0 && p <= 65535 {
+			target = hostPart
+			v.quickConnectPort = strconv.Itoa(p)
+		}
+	}
+	target = strings.Trim(target, "[]'\"")
+	if target != "" {
+		v.quickConnectHost = target
+	}
+}
+
+// 提交快速连接建立临时 SSH 标签页
+func (v *AppView) submitQuickConnect() {
+	v.syncQuickConnectFieldsFromTarget()
+
+	hostAddr := strings.TrimSpace(v.quickConnectHost)
+	if hostAddr == "" {
+		hostAddr = strings.TrimSpace(v.quickConnectTarget)
+	}
+	if hostAddr == "" {
+		v.quickConnectErrorMsg = "请输入主机 IP 或域名"
+		return
+	}
+
+	port := 22
+	if p, err := strconv.Atoi(strings.TrimSpace(v.quickConnectPort)); err == nil && p > 0 && p <= 65535 {
+		port = p
+	}
+
+	user := strings.TrimSpace(v.quickConnectUser)
+	if user == "" {
+		user = "root"
+	}
+
+	ephemeralHost := &model.Host{
+		ID:          "ephemeral-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+		Name:        "临时: " + hostAddr,
+		Address:     hostAddr,
+		Port:        port,
+		Username:    user,
+		Password:    v.quickConnectPassword,
+		AuthType:    model.AuthTypePassword,
+		IsEphemeral: true,
+	}
+
+	v.quickConnectModalOpen = false
+	v.openNewHostSession(ephemeralHost)
+}
+
+// renderQuickConnectModal 渲染快速连接弹窗 (简明无冗余文案)
+func (v *AppView) renderQuickConnectModal(c *ui.Context, t *ui.Theme) {
+	ui.Modal(c, &v.quickConnectModalOpen, func() {
+		ui.Column(c).Width(400).Gap(t.Space(3)).Children(func() {
+			// 1. 标题区
+			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				ui.Icon(c, IconServer).Width(18).Height(18).TextColor(t.Accent)
+				ui.Text(c, "快速连接").FontSize(15).Bold().TextColor(t.Text)
+			})
+
+			ui.Text(c, "临时建立 SSH 连接，断开后自动销毁，不保存至主机列表。").FontSize(12).TextColor(t.TextMuted)
+
+			// 2. 表单输入区
+			ui.Column(c).Gap(t.Space(2.5)).Children(func() {
+				// 快速目标输入框
+				ui.Column(c).Gap(4).Children(func() {
+					ui.Text(c, "连接目标").FontSize(12).TextColor(t.Text)
+					inp := ui.TextInput(c, &v.quickConnectTarget).Placeholder("如 root@192.168.1.100 或直接粘贴 ssh 命令")
+					if inp.Changed() {
+						v.syncQuickConnectFieldsFromTarget()
+					}
+				})
+
+				// 主机地址与端口分栏
+				ui.Row(c).Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Gap(4).Children(func() {
+						ui.Text(c, "主机地址").FontSize(12).TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectHost).Placeholder("IP 或域名")
+					})
+					ui.Column(c).Width(80).Gap(4).Children(func() {
+						ui.Text(c, "端口").FontSize(12).TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectPort).Placeholder("22")
+					})
+				})
+
+				// 用户名与密码分栏
+				ui.Row(c).Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Gap(4).Children(func() {
+						ui.Text(c, "用户名").FontSize(12).TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectUser).Placeholder("root")
+					})
+					ui.Column(c).Grow(1).Gap(4).Children(func() {
+						ui.Text(c, "密码").FontSize(12).TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectPassword).Password().Placeholder("密码 (可选)")
+					})
+				})
+
+				if v.quickConnectErrorMsg != "" {
+					ui.Text(c, v.quickConnectErrorMsg).FontSize(12).TextColor(ui.Hex("#EF4444"))
+				}
+			})
+
+			// 3. 底部操作按钮
+			ui.Row(c).AlignItems(ui.Center).Children(func() {
+				ui.Spacer(c)
+
+				if ui.Button(c, "取消").Clicked() {
+					v.quickConnectModalOpen = false
+				}
+
+				if ui.PrimaryButton(c, "连接").Clicked() {
+					v.submitQuickConnect()
+				}
+			})
+		})
+	})
+}
+
 // 打开新建主机弹窗
 func (v *AppView) openCreateModal() {
 	v.formID = ""
@@ -1805,6 +2019,16 @@ func (v *AppView) openHostSession(h *model.Host) {
 func (v *AppView) openNewHostSession(h *model.Host) {
 	session := NewTerminalSession(h)
 	session.OnUpdate = func() {
+		if v.window != nil {
+			v.window.Invalidate()
+		}
+	}
+	session.OnSSHIntercept = func(targetHost *model.Host) {
+		if targetHost.Password != "" {
+			v.openNewHostSession(targetHost)
+		} else {
+			v.openQuickConnectWithHost(targetHost)
+		}
 		if v.window != nil {
 			v.window.Invalidate()
 		}

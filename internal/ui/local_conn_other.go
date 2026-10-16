@@ -10,6 +10,6 @@ func shouldFallbackPipe() bool {
 }
 
 // startFallbackPipeTerminal 非 Windows 平台占位
-func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
+func startFallbackPipeTerminal(dir string, onIntercept func(line string) bool) (io.ReadWriteCloser, error) {
 	return nil, nil
 }

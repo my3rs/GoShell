@@ -111,7 +111,7 @@ func findWindowsShell() shellConfig {
 }
 
 // startFallbackPipeTerminal 在不支持 ConPTY 的旧版 Windows 上，通过匿名管道和静默后台进程启动虚拟终端 Shell
-func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
+func startFallbackPipeTerminal(dir string, onIntercept func(line string) bool) (io.ReadWriteCloser, error) {
 	shell := findWindowsShell()
 
 	if shell.isUTF8Shell {
@@ -205,6 +205,7 @@ func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
 		pw:          pw,
 		oemCP:       oemCP,
 		isUTF8Shell: shell.isUTF8Shell,
+		onIntercept: onIntercept,
 	}
 	go conn.readProcessOutputLoop()
 
@@ -221,6 +222,7 @@ type pipeConn struct {
 	oemCP       uint32
 	isUTF8Shell bool
 	lineBuf     []rune
+	onIntercept func(line string) bool
 	closed      bool
 }
 
@@ -310,15 +312,23 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 			// 1. 本地回显换行
 			_, _ = c.pw.Write([]byte("\r\n"))
 
-			// 2. 将当前行缓冲拼接 \r\n 并转码写入 cmd.exe 的标准输入管道
-			cmdLine := string(c.lineBuf) + "\r\n"
+			cmdLine := string(c.lineBuf)
 			c.lineBuf = c.lineBuf[:0]
 
+			// 2. 检查是否拦截特殊指令 (例如直接输入 ssh 命令)
+			if c.onIntercept != nil && c.onIntercept(cmdLine) {
+				_, _ = c.pw.Write([]byte("[GoShell] 已识别 SSH 命令，正在为您开启原生连接...\r\n"))
+				i++
+				continue
+			}
+
+			// 3. 将当前行缓冲拼接 \r\n 并转码写入子进程的标准输入管道
+			cmdToSend := cmdLine + "\r\n"
 			var toWrite []byte
 			if c.isUTF8Shell || c.oemCP == 0 || c.oemCP == 65001 {
-				toWrite = []byte(cmdLine)
+				toWrite = []byte(cmdToSend)
 			} else {
-				toWrite = utf8ToCP(c.oemCP, []byte(cmdLine))
+				toWrite = utf8ToCP(c.oemCP, []byte(cmdToSend))
 			}
 			if _, err := c.in.Write(toWrite); err != nil {
 				return 0, err

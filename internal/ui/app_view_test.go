@@ -504,4 +504,80 @@ func TestAppView_TabAnimationState(t *testing.T) {
 	}
 }
 
+func TestAppView_QuickConnect(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{},
+		},
+		theme:          DockerMateTheme(),
+		tabs:           []WorkspaceTab{{Type: TabTypeOverview, Title: "概览"}},
+		paneTabIndices: [4]int{0, 1, 2, 3},
+	}
+
+	// 1. 测试打开快速连接弹窗
+	v.openQuickConnectModal()
+	if !v.quickConnectModalOpen {
+		t.Errorf("Expected quickConnectModalOpen = true")
+	}
+	if v.quickConnectPort != "22" || v.quickConnectUser != "root" {
+		t.Errorf("Default port/user mismatch: port=%s, user=%s", v.quickConnectPort, v.quickConnectUser)
+	}
+
+	// 2. 测试输入解析
+	v.quickConnectTarget = "ssh -p 2222 admin@192.168.1.50"
+	v.syncQuickConnectFieldsFromTarget()
+	if v.quickConnectHost != "192.168.1.50" {
+		t.Errorf("quickConnectHost = %q, want 192.168.1.50", v.quickConnectHost)
+	}
+	if v.quickConnectPort != "2222" {
+		t.Errorf("quickConnectPort = %q, want 2222", v.quickConnectPort)
+	}
+	if v.quickConnectUser != "admin" {
+		t.Errorf("quickConnectUser = %q, want admin", v.quickConnectUser)
+	}
+
+	// 3. 测试提交快速连接
+	v.quickConnectPassword = "mypassword"
+	v.submitQuickConnect()
+
+	if v.quickConnectModalOpen {
+		t.Errorf("Expected quickConnectModalOpen = false after submit")
+	}
+	if len(v.tabs) != 2 {
+		t.Fatalf("Expected 2 tabs after quick connect, got %d", len(v.tabs))
+	}
+
+	tab := v.tabs[1]
+	if tab.Type != TabTypeSession || tab.Session == nil {
+		t.Fatalf("Expected tab to be a session tab")
+	}
+	if !tab.Session.Host.IsEphemeral {
+		t.Errorf("Expected Host.IsEphemeral = true")
+	}
+	if tab.Session.Host.Address != "192.168.1.50" {
+		t.Errorf("Host.Address = %q, want 192.168.1.50", tab.Session.Host.Address)
+	}
+	if tab.Session.Host.Port != 2222 {
+		t.Errorf("Host.Port = %d, want 2222", tab.Session.Host.Port)
+	}
+	if tab.Session.Host.Password != "mypassword" {
+		t.Errorf("Host.Password = %q, want mypassword", tab.Session.Host.Password)
+	}
+
+	// 4. 测试基于已有 Host 打开快速连接弹窗
+	preparsed := &model.Host{
+		Address:  "example.com",
+		Port:     8022,
+		Username: "deploy",
+	}
+	v.openQuickConnectWithHost(preparsed)
+	if !v.quickConnectModalOpen {
+		t.Errorf("Expected quickConnectModalOpen = true")
+	}
+	if v.quickConnectHost != "example.com" || v.quickConnectPort != "8022" || v.quickConnectUser != "deploy" {
+		t.Errorf("openQuickConnectWithHost mismatch: host=%s, port=%s, user=%s", v.quickConnectHost, v.quickConnectPort, v.quickConnectUser)
+	}
+}
+
+
 
