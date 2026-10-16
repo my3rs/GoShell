@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -62,6 +63,8 @@ type AppView struct {
 	searchQuery     string
 	activeTabIndex  int
 	tabs            []WorkspaceTab
+	tabPillReady    bool
+	lastTabRect     ui.Rect
 	selectedHostID  string
 	showHiddenFiles bool
 
@@ -223,16 +226,35 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 			})
 		})
 
-		// 2. 双 Tab 切换控制器 (Segmented Tab Bar)
-		ui.Row(c).Height(28).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
+		// 2. 双 Tab 切换控制器 (Segmented Tab Bar，带平滑滑动高亮胶囊动画)
+		segTrack := ui.Row(c).Key("sidebar_tab_segmented").Height(28).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center)
+
+		// 补间动画插值：0 (主机列表) 到 1 (远程文件)
+		animPos := segTrack.AnimateWith("sidebar_tab_pos", float32(v.sidebarTab), 180*time.Millisecond, ui.EaseOut)
+
+		segTrack.Draw(func(p *ui.Painter, r ui.Rect) {
+			pad := float32(2)
+			gap := float32(2)
+			h := r.H - 2*pad
+			w := (r.W - 2*pad - gap) / 2
+			if w <= 0 {
+				return
+			}
+			pillX := r.X + pad + animPos*(w+gap)
+			pillY := r.Y + pad
+			pillRect := ui.Rect{X: pillX, Y: pillY, W: w, H: h}
+			// shadcn 风格精致微投影与纯白高亮底色
+			p.Shadow(pillRect, t.Radius-2, 0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.08))
+			p.Fill(pillRect, t.Surface, t.Radius-2)
+		})
+
+		segTrack.Children(func() {
 			// Tab 0: 主机列表 (平铺)
-			hostTabBg := ui.Hex("#E2E8F0")
 			hostTabFg := ColSidebarText
 			if v.sidebarTab == 0 {
-				hostTabBg = t.Surface
 				hostTabFg = t.Text
 			}
-			ui.Row(c).Grow(1).Height(24).Background(hostTabBg).Radius(t.Radius - 2).Center().Gap(t.Space(1)).Children(func() {
+			ui.Row(c).Grow(1).Height(24).Background(ui.Transparent).Radius(t.Radius - 2).Center().Gap(t.Space(1)).Children(func() {
 				ui.Icon(c, IconServer).TextColor(hostTabFg).Width(12).Height(12)
 				ui.Text(c, fmt.Sprintf("主机 (%d)", len(v.app.Hosts))).FontSize(11).Bold().TextColor(hostTabFg)
 			}).OnClick(func() {
@@ -240,13 +262,11 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 			})
 
 			// Tab 1: 远程文件
-			fileTabBg := ui.Hex("#E2E8F0")
 			fileTabFg := ColSidebarText
 			if v.sidebarTab == 1 {
-				fileTabBg = t.Surface
 				fileTabFg = t.Text
 			}
-			ui.Row(c).Grow(1).Height(24).Background(fileTabBg).Radius(t.Radius - 2).Center().Gap(t.Space(1)).Children(func() {
+			ui.Row(c).Grow(1).Height(24).Background(ui.Transparent).Radius(t.Radius - 2).Center().Gap(t.Space(1)).Children(func() {
 				ui.Icon(c, IconFolder).TextColor(fileTabFg).Width(12).Height(12)
 				ui.Text(c, "文件").FontSize(11).Bold().TextColor(fileTabFg)
 			}).OnClick(func() {
@@ -455,7 +475,12 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		// 顶部多标签栏 (下方开放无缝衔接工作区，依靠底色自然区分)
 		tabToClose := -1
-		ui.Row(c).Height(36).Background(ColSidebarBg).Padding(0, 8, 0, 8).AlignItems(ui.Center).Gap(4).Children(func() {
+		tabBar := ui.Row(c).Key("workspace_tab_bar").Height(36).Background(ColSidebarBg).Padding(0, 8, 0, 8).AlignItems(ui.Center).Gap(4)
+
+		var targetRect ui.Rect
+		foundActive := false
+
+		tabBar.Children(func() {
 			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符 (高度与各 Tab 严格水平居中对齐)
 			if v.sidebarCollapsed {
 				btnExpand := ui.ButtonBase(c).Tooltip("展开侧边栏 (Cmd+B)").Width(26).Height(26).Radius(t.Radius - 2).Center()
@@ -513,18 +538,27 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 
 				// Tab 卡片：高 28px 居中对齐，圆角与左侧主机、文件 Tab 完全一致 (Radius: t.Radius - 2，精确 4px)
 				cardBg := ui.Transparent
-				if isFocused {
-					cardBg = t.Surface // 激活态纯白卡片底色
-				} else if isTiled {
+				if isTiled {
 					cardBg = ui.Hex("#F1F5F9") // 平铺态淡灰卡片底色
+				} else if isFocused && !v.tabPillReady {
+					cardBg = t.Surface // 首次无动画位置缓存时静态纯白兜底
 				}
 
-				tabCard := ui.Row(c).Height(28).AlignItems(ui.Center).Gap(t.Space(1.5)).
+				tabKey := fmt.Sprintf("ws_tab_%d_%d", index, tab.Type)
+				tabCard := ui.Row(c).Key(tabKey).Height(28).AlignItems(ui.Center).Gap(t.Space(1.5)).
 					Background(cardBg).
 					Radius(t.Radius - 2).
 					Padding(0, 10).
 					Shrink(1).
 					MaxWidth(220)
+
+				if isFocused {
+					bounds := tabCard.LayoutBounds()
+					if bounds.W > 0 {
+						targetRect = bounds
+						foundActive = true
+					}
+				}
 
 				if !isFocused && !isTiled && tabCard.Hovered() {
 					tabCard.Background(ui.Hex("#DFE5EC"))
@@ -582,6 +616,31 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			// 快速布局一键切换控制胶囊组 (单视窗 / 左右双 Tab 并列 / 四宫格)
 			v.renderLayoutSwitcher(c, t)
 		})
+
+		if foundActive {
+			v.tabPillReady = true
+			v.lastTabRect = targetRect
+		}
+
+		if v.tabPillReady && v.lastTabRect.W > 0 {
+			targetX := v.lastTabRect.X
+			targetW := v.lastTabRect.W
+			pillX := tabBar.AnimateWith("ws_tab_pill_x", targetX, 180*time.Millisecond, ui.EaseOut)
+			pillW := tabBar.AnimateWith("ws_tab_pill_w", targetW, 180*time.Millisecond, ui.EaseOut)
+			pillY := v.lastTabRect.Y
+			pillH := v.lastTabRect.H
+
+			tabBar.Draw(func(p *ui.Painter, r ui.Rect) {
+				pillRect := ui.Rect{
+					X: pillX,
+					Y: pillY,
+					W: pillW,
+					H: pillH,
+				}
+				p.Shadow(pillRect, t.Radius-2, 0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.08))
+				p.Fill(pillRect, t.Surface, t.Radius-2)
+			})
+		}
 
 		if tabToClose >= 0 {
 			v.closeTab(tabToClose)

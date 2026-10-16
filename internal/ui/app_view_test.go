@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
+	"goshell/internal/app"
 	"goshell/internal/core/model"
 )
 
@@ -451,4 +453,55 @@ func TestAppView_SwitchActivePaneToTab(t *testing.T) {
 		t.Errorf("Expected activeTabIndex to be 0, got %d", v.activeTabIndex)
 	}
 }
+
+func TestAppView_TabAnimationState(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{
+				{ID: "host-1", Name: "Server 1", Address: "1.1.1.1", Port: 22},
+			},
+		},
+		theme:          DockerMateTheme(),
+		sidebarTab:     0,
+		activeTabIndex: 0,
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+			{Type: TabTypeSession, Title: "Server 1"},
+		},
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 800, 600)
+
+	// 第 1 帧渲染
+	tt.Frame()
+
+	// 第 2 帧渲染，布局边界已稳定，tabPillReady 应当为 true，且已正确捕获激活 Tab 尺寸
+	tt.Frame()
+	if !v.tabPillReady {
+		t.Errorf("Expected tabPillReady to be true after initial frames render")
+	}
+	if v.lastTabRect.W <= 0 {
+		t.Errorf("Expected lastTabRect.W > 0, got %f", v.lastTabRect.W)
+	}
+
+	// 验证侧边栏分段 Tab 切换
+	v.sidebarTab = 1
+	tt.Frame()
+	if v.sidebarTab != 1 {
+		t.Errorf("Expected sidebarTab to be 1, got %d", v.sidebarTab)
+	}
+
+	// 验证工作区 Tab 切换
+	v.switchActivePaneToTab(1)
+	tt.Frame()
+	if v.activeTabIndex != 1 {
+		t.Errorf("Expected activeTabIndex to be 1, got %d", v.activeTabIndex)
+	}
+	if v.lastTabRect.W <= 0 {
+		t.Errorf("Expected lastTabRect.W > 0 after tab switch, got %f", v.lastTabRect.W)
+	}
+}
+
 
