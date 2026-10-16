@@ -1854,7 +1854,7 @@ func (v *AppView) renderQuickConnectModal(c *ui.Context, t *ui.Theme) {
 			})
 
 			// 3. 底部操作按钮
-			ui.Row(c).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 				ui.Spacer(c)
 
 				if ui.Button(c, "取消").Clicked() {
