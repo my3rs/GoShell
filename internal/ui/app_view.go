@@ -66,6 +66,7 @@ type AppView struct {
 	tabs            []WorkspaceTab
 	tabPillReady    bool
 	lastTabRect     ui.Rect
+	selectedHostID  string
 	showHiddenFiles bool
 	prevTabTitles   []string
 
@@ -598,6 +599,12 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				})
 				if tabToClose != index && tabCard.Clicked() {
 					v.switchActivePaneToTab(index)
+					bounds := tabCard.LayoutBounds()
+					if bounds.W > 0 {
+						targetRect = bounds
+						foundActive = true
+					}
+					c.Invalidate()
 				}
 
 				tabCard.Children(func() {
@@ -691,13 +698,13 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			// 2. 终端平铺视图 (支持单视窗全屏、左右双终端并列、四宫格 2x2 并列)
 			switch v.layoutMode {
 			case LayoutDualSplit:
-				ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Border(1, ui.Hex("#334155")).Children(func() {
+				ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Children(func() {
 					v.renderTilePane(c, t, 0)
 					ui.Box(c).Width(1).Background(ui.Hex("#334155"))
 					v.renderTilePane(c, t, 1)
 				})
 			case LayoutQuadGrid:
-				ui.Column(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Border(1, ui.Hex("#334155")).Children(func() {
+				ui.Column(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Children(func() {
 					ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 						v.renderTilePane(c, t, 0)
 						ui.Box(c).Width(1).Background(ui.Hex("#334155"))
@@ -982,6 +989,11 @@ func (v *AppView) switchActivePaneToTab(tabIndex int) {
 		tabIndex = 0
 	}
 	v.activeTabIndex = tabIndex
+	if tabIndex >= 0 && tabIndex < len(v.tabs) {
+		if s := v.tabs[tabIndex].Session; s != nil && s.Host != nil {
+			v.selectedHostID = s.Host.ID
+		}
+	}
 
 	// 概览页 (index 0) 独立全屏展示，绝不绑定到平铺窗格中
 	if tabIndex == 0 {
@@ -1222,7 +1234,7 @@ func (v *AppView) renderTilePane(c *ui.Context, t *ui.Theme, paneIndex int) {
 		}
 	})
 
-	if (paneBox.Clicked() || paneBox.FocusWithin()) && !isActivePane {
+	if paneBox.Clicked() && !isActivePane {
 		v.setActivePane(paneIndex)
 	}
 }

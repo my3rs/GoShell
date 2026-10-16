@@ -939,7 +939,7 @@ func TestAppView_HoverBackgroundConsistency(t *testing.T) {
 }
 
 func TestAppView_ClickUntiledTabInSplit(t *testing.T) {
-	// 情形 A: 3个Tab (Overview, Host-1, Host-2) 开启分屏
+	// 情形 A: 3个Tab (Overview, Host-1, Host-2) 开启分屏，未参与分屏的概览 Tab 切换
 	v := &AppView{
 		app: &app.App{
 			Hosts: []*model.Host{
@@ -950,8 +950,8 @@ func TestAppView_ClickUntiledTabInSplit(t *testing.T) {
 		theme: DockerMateTheme(),
 		tabs: []WorkspaceTab{
 			{Type: TabTypeOverview, Title: "概览"},
-			{Type: TabTypeSession, Title: "Host-1", Session: &TerminalSession{Host: &model.Host{ID: "h1", Name: "Host-1", Address: "1.1.1.1"}}},
-			{Type: TabTypeSession, Title: "Host-2", Session: &TerminalSession{Host: &model.Host{ID: "h2", Name: "Host-2", Address: "2.2.2.2"}}},
+			{Type: TabTypeSession, Title: "Session-1", Session: &TerminalSession{Host: &model.Host{ID: "h1", Name: "Host-1", Address: "1.1.1.1"}}},
+			{Type: TabTypeSession, Title: "Session-2", Session: &TerminalSession{Host: &model.Host{ID: "h2", Name: "Host-2", Address: "2.2.2.2"}}},
 		},
 		activeTabIndex: 1,
 		sidebarWidth:   240,
@@ -965,18 +965,37 @@ func TestAppView_ClickUntiledTabInSplit(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	t.Logf("Initial state: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v.activeTabIndex, v.activePaneIndex, v.paneTabIndices)
-
-	// 点击概览 Tab
-	rectOverview, okOverview := tt.Find("概览")
-	t.Logf("Find 概览: %+v (ok: %v)", rectOverview, okOverview)
-	if okOverview {
-		tt.Click("概览")
-		tt.Frame()
-		t.Logf("After click 概览: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v.activeTabIndex, v.activePaneIndex, v.paneTabIndices)
+	if v.activeTabIndex != 1 || v.paneTabIndices[0] != 1 || v.paneTabIndices[1] != 2 {
+		t.Fatalf("Unexpected initial state: activeTabIndex=%d, panes=%v", v.activeTabIndex, v.paneTabIndices)
 	}
 
-	// 情形 B: 3个终端Tab + 概览 (Overview, Tab-A, Tab-B, Tab-C)
+	// 1. 点击概览 Tab (未参与分屏)
+	_, okOverview := tt.Find("概览")
+	if !okOverview {
+		t.Fatalf("Could not find Overview tab")
+	}
+	tt.Click("概览")
+	tt.Frame()
+	tt.Frame()
+
+	if v.activeTabIndex != 0 {
+		t.Errorf("Expected activeTabIndex to be 0 (Overview), got %d", v.activeTabIndex)
+	}
+
+	// 2. 从概览切换回分屏中的 Session-2 Tab
+	tt.Click("Session-2")
+	tt.Frame()
+	tt.Frame()
+	t.Logf("After click Session-2: activeTabIndex=%d, activePaneIndex=%d", v.activeTabIndex, v.activePaneIndex)
+
+	if v.activeTabIndex != 2 {
+		t.Errorf("Expected activeTabIndex to be 2, got %d", v.activeTabIndex)
+	}
+	if v.activePaneIndex != 1 {
+		t.Errorf("Expected activePaneIndex to be 1 (Right Pane), got %d", v.activePaneIndex)
+	}
+
+	// 情形 B: 3个终端Tab + 概览 (Overview, Tab-A, Tab-B, Tab-C) 开启分屏，未参与分屏的终端 Tab 切换
 	v3 := &AppView{
 		app: &app.App{
 			Hosts: []*model.Host{
@@ -1004,22 +1023,63 @@ func TestAppView_ClickUntiledTabInSplit(t *testing.T) {
 	tt3.Frame()
 	tt3.Frame()
 
-	t.Logf("v3 Initial state: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v3.activeTabIndex, v3.activePaneIndex, v3.paneTabIndices)
-
-	rectTabC, okTabC := tt3.Find("Tab-C")
-	t.Logf("Find Tab-C: %+v (ok: %v)", rectTabC, okTabC)
-	if okTabC {
-		tt3.Click("Tab-C")
-		tt3.Frame()
-		t.Logf("v3 After click Tab-C: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v3.activeTabIndex, v3.activePaneIndex, v3.paneTabIndices)
+	// 初始状态：Pane 0 是 Tab-A (index 1)，Pane 1 是 Tab-B (index 2)，Tab-C (index 3) 未参与分屏
+	if v3.paneTabIndices[0] != 1 || v3.paneTabIndices[1] != 2 {
+		t.Fatalf("Unexpected v3 initial panes: %v", v3.paneTabIndices)
+	}
+	if v3.activePaneIndex != 0 || v3.activeTabIndex != 1 {
+		t.Fatalf("Expected activePaneIndex 0 and activeTabIndex 1, got pane=%d, tab=%d", v3.activePaneIndex, v3.activeTabIndex)
 	}
 
-	rectOverview3, okOverview3 := tt3.Find("概览")
-	t.Logf("Find v3 概览: %+v (ok: %v)", rectOverview3, okOverview3)
-	if okOverview3 {
-		tt3.Click("概览")
-		tt3.Frame()
-		t.Logf("v3 After click 概览: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v3.activeTabIndex, v3.activePaneIndex, v3.paneTabIndices)
+	// 1. 点击未参与分屏的 Tab-C：应当载入当前聚焦窗格 (Pane 0)
+	tt3.Click("Tab-C")
+	tt3.Frame()
+	tt3.Frame()
+
+	if v3.activeTabIndex != 3 {
+		t.Errorf("Expected activeTabIndex to be 3 (Tab-C), got %d", v3.activeTabIndex)
+	}
+	if v3.paneTabIndices[0] != 3 {
+		t.Errorf("Expected Left Pane (0) to display Tab-C (3), got %d", v3.paneTabIndices[0])
+	}
+	if v3.paneTabIndices[1] != 2 {
+		t.Errorf("Expected Right Pane (1) to still display Tab-B (2), got %d", v3.paneTabIndices[1])
+	}
+
+	// 验证位置标识文本：Tab-C 标“左”，Tab-B 标“右”，Tab-A 变为未分屏标签（空）
+	lblC, pC := v3.getTabPanePositionLabel(3)
+	if lblC != "左" || pC != 0 {
+		t.Errorf("Expected Tab-C label '左' and pane 0, got %q, %d", lblC, pC)
+	}
+	lblB, pB := v3.getTabPanePositionLabel(2)
+	if lblB != "右" || pB != 1 {
+		t.Errorf("Expected Tab-B label '右' and pane 1, got %q, %d", lblB, pB)
+	}
+	lblA, pA := v3.getTabPanePositionLabel(1)
+	if lblA != "" || pA != -1 {
+		t.Errorf("Expected Tab-A (untiled) to have no position label, got %q, %d", lblA, pA)
+	}
+
+	// 2. 切换活动窗格到右窗格 (Pane 1)
+	v3.setActivePane(1)
+	tt3.Frame()
+	if v3.activePaneIndex != 1 || v3.activeTabIndex != 2 {
+		t.Fatalf("Expected activePaneIndex 1 and activeTabIndex 2, got pane=%d, tab=%d", v3.activePaneIndex, v3.activeTabIndex)
+	}
+
+	// 3. 在聚焦右窗格时，点击未参与分屏的 Tab-A：应当载入右窗格 (Pane 1)
+	tt3.Click("Tab-A")
+	tt3.Frame()
+	tt3.Frame()
+
+	if v3.activeTabIndex != 1 {
+		t.Errorf("Expected activeTabIndex to be 1 (Tab-A), got %d", v3.activeTabIndex)
+	}
+	if v3.paneTabIndices[1] != 1 {
+		t.Errorf("Expected Right Pane (1) to display Tab-A (1), got %d", v3.paneTabIndices[1])
+	}
+	if v3.paneTabIndices[0] != 3 {
+		t.Errorf("Expected Left Pane (0) to still display Tab-C (3), got %d", v3.paneTabIndices[0])
 	}
 }
 

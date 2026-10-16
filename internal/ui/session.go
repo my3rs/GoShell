@@ -536,25 +536,25 @@ func (s *TerminalSession) ShouldShowTransferQueue() bool {
 
 // Render 在主工作区全高渲染终端界面（免除底部挤占，100% 满屏高度，深度复刻 docker-mate web 终端外观）
 func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onSwitchToFiles func(), onFocus func()) {
-	ui.Column(c).Fill().Background(t.Surface).Children(func() {
-		// 1. 会话控制栏 (复刻 docker-mate 的顶部会话状态栏，高度 36px)
-		vStatusBadgeBg := ColBadgeGreenBg
-		vStatusBadgeFg := ColBadgeGreenText
-		vStatusDotColor := t.Success
+	ui.Column(c).Fill().Background(ColTerminalBg).Children(func() {
+		// 1. 会话控制栏 (暗黑质感顶部会话状态栏，高度 36px，与终端融为一体)
+		vStatusBadgeBg := ui.RGBA(34, 197, 94, 0.18)
+		vStatusBadgeFg := ui.Hex("#4ADE80")
+		vStatusDotColor := ui.Hex("#22C55E")
 		vStatusText := "已连接"
 		if s.Connecting {
-			vStatusBadgeBg = ColBadgeAmberBg
-			vStatusBadgeFg = ColBadgeAmberText
-			vStatusDotColor = t.Warning
+			vStatusBadgeBg = ui.RGBA(245, 158, 11, 0.18)
+			vStatusBadgeFg = ui.Hex("#FBBF24")
+			vStatusDotColor = ui.Hex("#F59E0B")
 			vStatusText = "连接中..."
 		} else if !s.Connected {
-			vStatusBadgeBg = ui.Hex("#FEE2E2")
-			vStatusBadgeFg = t.Danger
-			vStatusDotColor = t.Danger
+			vStatusBadgeBg = ui.RGBA(239, 68, 68, 0.18)
+			vStatusBadgeFg = ui.Hex("#F87171")
+			vStatusDotColor = ui.Hex("#EF4444")
 			vStatusText = "已断开"
 		}
 
-		sessionBar := ui.Row(c).Height(36).Shrink(0).Background(t.Surface).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2))
+		sessionBar := ui.Row(c).Height(36).Shrink(0).Background(ColTerminalBg).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(t.Space(2))
 		if sessionBar.Clicked() && onFocus != nil {
 			onFocus()
 		}
@@ -565,10 +565,10 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 				ui.Text(c, vStatusText).FontSize(10.5).Bold().TextColor(vStatusBadgeFg)
 			})
 
-			// 主机名与网络地址
-			ui.Text(c, s.Host.Name).FontSize(12).Bold().TextColor(t.Text)
+			// 主机名与网络地址 (暗黑终端高对比度文字)
+			ui.Text(c, s.Host.Name).FontSize(12).Bold().TextColor(ui.Hex("#F4F4F5"))
 			if s.Host.AuthType != model.AuthTypeLocal {
-				ui.Text(c, fmt.Sprintf("(%s:%d)", s.Host.Address, s.Host.Port)).FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, fmt.Sprintf("(%s:%d)", s.Host.Address, s.Host.Port)).FontSize(11).TextColor(ui.Hex("#A1A1AA"))
 			}
 
 			ui.Spacer(c)
