@@ -15,10 +15,6 @@
   <img src="https://img.shields.io/badge/Platform-macOS%20|%20Windows%20|%20Linux-lightgrey?style=flat-square" alt="Platform" />
 </p>
 
-<p align="center">
-  <img src="assets/brand/preview.png" alt="GoShell 界面与品牌预览" width="800" />
-</p>
-
 ---
 
 ## 项目简介
