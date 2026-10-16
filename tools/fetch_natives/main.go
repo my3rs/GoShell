@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -139,7 +140,44 @@ func main() {
 		}
 		fmt.Printf("[%s] Successfully downloaded and verified: %s\n", t.Target, destFile)
 	}
+
+	// 确保 Windows 平台的 dll 与 exe 具备同步压缩的 .gz 文件供单文件内嵌
+	for _, t := range targets {
+		if t.Target == "windows-amd64" || t.Target == "windows-arm64" {
+			src := filepath.Join("assets", "natives", t.Target, t.Name)
+			gz := src + ".gz"
+			if err := compressToGzip(src, gz); err != nil {
+				fmt.Printf("Warning: failed to compress %s to gzip: %v\n", src, err)
+			} else {
+				fmt.Printf("[%s] Gzip compressed: %s\n", t.Target, gz)
+			}
+		}
+	}
+
 	fmt.Println("All native libraries are ready!")
+}
+
+func compressToGzip(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	gw, err := gzip.NewWriterLevel(out, gzip.BestCompression)
+	if err != nil {
+		return err
+	}
+	defer gw.Close()
+
+	_, err = io.Copy(gw, in)
+	return err
 }
 
 func checkSHA256(path string, expected string) bool {

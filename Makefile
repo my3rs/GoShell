@@ -36,7 +36,7 @@ fetch-natives:
 build:
 	@mkdir -p $(OUT_DIR)
 	@echo "==> 编译本地版本..."
-	go build -ldflags="-s -w" -o $(OUT_DIR)/goshell $(MAIN_SRC)
+	go build -trimpath -ldflags="-s -w" -o $(OUT_DIR)/goshell $(MAIN_SRC)
 	@echo "==> 生成成功: $(OUT_DIR)/goshell"
 
 ## run: 本地启动运行
@@ -66,6 +66,7 @@ build-windows: ensure-winres
 	@echo "==> [2/3] 编译 Windows 64位程序 (去除黑框控制台)..."
 	@trap 'rm -f cmd/goshell/*.syso' EXIT; \
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+		-trimpath \
 		-ldflags="-H windowsgui -s -w" \
 		-o $(OUT_DIR)/$(APP_NAME).exe \
 		$(MAIN_SRC)
@@ -91,6 +92,7 @@ build-windows-arm64: ensure-winres
 	@echo "==> [2/3] 编译 Windows ARM64 程序..."
 	@trap 'rm -f cmd/goshell/*.syso' EXIT; \
 	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build \
+		-trimpath \
 		-ldflags="-H windowsgui -s -w" \
 		-o $(OUT_DIR)/$(APP_NAME)-arm64.exe \
 		$(MAIN_SRC)
@@ -113,7 +115,7 @@ package-windows: build-windows
 build-darwin:
 	@mkdir -p $(OUT_DIR)
 	@echo "==> 编译 macOS 版本..."
-	go build -ldflags="-s -w" -o $(OUT_DIR)/$(APP_NAME)-darwin $(MAIN_SRC)
+	go build -trimpath -ldflags="-s -w" -o $(OUT_DIR)/$(APP_NAME)-darwin $(MAIN_SRC)
 	@ARCH=$$(uname -m | sed 's/x86_64/amd64/'); \
 	if [ -f $(NATIVES_DIR)/darwin-$$ARCH/libghostty-vt.dylib ]; then \
 		cp $(NATIVES_DIR)/darwin-$$ARCH/libghostty-vt.dylib $(OUT_DIR)/; \
@@ -124,7 +126,7 @@ build-darwin:
 build-linux:
 	@mkdir -p $(OUT_DIR)
 	@echo "==> 编译 Linux amd64 版本..."
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(OUT_DIR)/$(APP_NAME)-linux $(MAIN_SRC)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o $(OUT_DIR)/$(APP_NAME)-linux $(MAIN_SRC)
 	@cp $(NATIVES_DIR)/linux-amd64/libghostty-vt.so $(OUT_DIR)/
 	@echo "==> 生成成功: $(OUT_DIR)/$(APP_NAME)-linux"
 

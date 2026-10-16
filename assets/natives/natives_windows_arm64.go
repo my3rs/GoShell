@@ -4,10 +4,10 @@ package natives
 
 import _ "embed"
 
-//go:embed windows-arm64/ghostty-vt.dll
+//go:embed windows-arm64/ghostty-vt.dll.gz
 var embeddedBytes []byte
 
-//go:embed windows-arm64/busybox.exe
+//go:embed windows-arm64/busybox.exe.gz
 var embeddedBusyboxBytes []byte
 
 const (

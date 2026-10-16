@@ -1,6 +1,8 @@
 package natives
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -55,7 +57,7 @@ func Ensure() error {
 				continue
 			}
 			tmpFile := fmt.Sprintf("%s.tmp-%d", targetPath, os.Getpid())
-			if err := os.WriteFile(tmpFile, embeddedBytes, 0o755); err != nil {
+			if err := writeDecompressedBytes(tmpFile, embeddedBytes, 0o755); err != nil {
 				continue
 			}
 			_ = os.Rename(tmpFile, targetPath)
@@ -120,7 +122,7 @@ func EnsureBusybox() (string, error) {
 				continue
 			}
 			tmpFile := fmt.Sprintf("%s.tmp-%d", targetPath, os.Getpid())
-			if err := os.WriteFile(tmpFile, embeddedBusyboxBytes, 0o755); err != nil {
+			if err := writeDecompressedBytes(tmpFile, embeddedBusyboxBytes, 0o755); err != nil {
 				continue
 			}
 			_ = os.Rename(tmpFile, targetPath)
@@ -132,6 +134,25 @@ func EnsureBusybox() (string, error) {
 	}
 
 	return "", fmt.Errorf("busybox not found or failed to extract")
+}
+
+// writeDecompressedBytes 将数据流透明写入目标文件：若是 gzip 压缩数据则自动解压写出，否则原样写入
+func writeDecompressedBytes(targetPath string, data []byte, perm os.FileMode) error {
+	gzReader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		// 非 gzip 数据，直接常规写入（向前兼容）
+		return os.WriteFile(targetPath, data, perm)
+	}
+	defer gzReader.Close()
+
+	out, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, gzReader)
+	return err
 }
 
 func verifyFile(path string, expectedSHA string) bool {
