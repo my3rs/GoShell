@@ -54,7 +54,7 @@ flowchart TD
     end
 
     subgraph Core ["核心能力层"]
-        SSHClient["SSH 客户端"]
+        SSHClient["SSH 客户端与信道"]
         SFTPClient["SFTP 客户端与传输队列"]
         Storage["本地存储"]
         Security["数据加密服务"]
@@ -65,11 +65,14 @@ flowchart TD
         Storage --> Security
     end
 
-    subgraph Natives ["运行时支持"]
-        Ghostty["Ghostty-VT 终端引擎"]
-        Busybox["内置命令行工具"]
+    subgraph Runtime ["运行时与终端支持"]
+        Ghostty["Ghostty-VT 终端仿真引擎"]
+        LocalPTY["PTY / ConPTY 适配器"]
+        Shells["本地 Shell (CMD / PowerShell / BusyBox / 原生 Shell)"]
+        
         TermSession --> Ghostty
-        TermSession --> Busybox
+        TermSession --> LocalPTY
+        LocalPTY --> Shells
     end
 ```
 
