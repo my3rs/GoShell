@@ -89,3 +89,56 @@ func TestLocalConn_ShouldFallbackPipeNonWindows(t *testing.T) {
 		t.Errorf("shouldFallbackPipe() on non-windows = true, want false")
 	}
 }
+
+func TestLocalConn_RuneWidth(t *testing.T) {
+	tests := []struct {
+		r    rune
+		want int
+	}{
+		{'a', 1},
+		{'Z', 1},
+		{'1', 1},
+		{' ', 1},
+		{'$', 1},
+		{'你', 2},
+		{'好', 2},
+		{'中', 2},
+		{'，', 2}, // fullwidth comma
+		{'。', 2}, // fullwidth period
+		{'（', 2}, // fullwidth parenthesis
+	}
+
+	for _, tt := range tests {
+		got := runeWidth(tt.r)
+		if got != tt.want {
+			t.Errorf("runeWidth(%q) = %d, want %d", tt.r, got, tt.want)
+		}
+	}
+}
+
+func TestLocalConn_SkipEscapeSequence(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		pos  int
+		want int
+	}{
+		{"not escape", "abc", 0, 0},
+		{"arrow up CSI", "\x1b[Arest", 0, 3},
+		{"arrow down CSI", "\x1b[Brest", 0, 3},
+		{"f5 CSI with tilde", "\x1b[15~rest", 0, 5},
+		{"SS3 key", "\x1bOPrest", 0, 3},
+		{"incomplete CSI", "\x1b[12", 0, 4},
+		{"isolated escape", "\x1b", 0, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runes := []rune(tt.in)
+			got := skipEscapeSequence(runes, tt.pos)
+			if got != tt.want {
+				t.Errorf("skipEscapeSequence(%q, %d) = %d, want %d", tt.in, tt.pos, got, tt.want)
+			}
+		})
+	}
+}

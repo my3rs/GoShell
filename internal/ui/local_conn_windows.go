@@ -121,115 +121,161 @@ func startFallbackPipeTerminal(dir string) (io.ReadWriteCloser, error) {
 		oemCP = uint32(r)
 	}
 
-	return &pipeConn{
+	pr, pw := io.Pipe()
+	conn := &pipeConn{
 		process: pi.Process,
 		in:      os.NewFile(uintptr(inW), "pipe-in"),
 		out:     os.NewFile(uintptr(outR), "pipe-out"),
+		pr:      pr,
+		pw:      pw,
 		oemCP:   oemCP,
-	}, nil
+	}
+	go conn.readProcessOutputLoop()
+
+	return conn, nil
 }
 
 type pipeConn struct {
-	mu          sync.Mutex
-	process     syscall.Handle
-	in          *os.File
-	out         *os.File
-	oemCP       uint32
-	readBuf     []byte
-	readPending []byte
-	closed      bool
+	mu      sync.Mutex
+	process syscall.Handle
+	in      *os.File
+	out     *os.File
+	pr      *io.PipeReader
+	pw      *io.PipeWriter
+	oemCP   uint32
+	lineBuf []rune
+	closed  bool
+}
+
+// readProcessOutputLoop 在后台持续读取子进程输出，流式转码 GBK -> UTF-8 并写入管道供终端消费
+func (c *pipeConn) readProcessOutputLoop() {
+	raw := make([]byte, 4096)
+	var data []byte
+	var pending []byte
+
+	for {
+		n, err := c.out.Read(raw)
+		if n > 0 {
+			data = append(pending, raw[:n]...)
+			pending = nil
+
+			var outBytes []byte
+			if c.oemCP == 0 || c.oemCP == 65001 {
+				outBytes = data
+				data = nil
+			} else {
+				valid, inc := isUTF8(data)
+				if valid {
+					if inc > 0 && err == nil {
+						pending = append(pending, data[len(data)-inc:]...)
+						data = data[:len(data)-inc]
+					}
+					outBytes = data
+				} else {
+					incTail := gbkIncompleteTail(data)
+					if incTail > 0 && err == nil {
+						pending = append(pending, data[len(data)-incTail:]...)
+						data = data[:len(data)-incTail]
+					}
+					if len(data) > 0 {
+						outBytes = cpToUTF8(c.oemCP, data)
+					}
+				}
+				data = nil
+			}
+
+			if len(outBytes) > 0 {
+				if _, werr := c.pw.Write(outBytes); werr != nil {
+					break
+				}
+			}
+		}
+
+		if err != nil {
+			if len(pending) > 0 && c.oemCP != 0 && c.oemCP != 65001 {
+				outBytes := cpToUTF8(c.oemCP, pending)
+				_, _ = c.pw.Write(outBytes)
+			}
+			_ = c.pw.CloseWithError(err)
+			break
+		}
+	}
 }
 
 func (c *pipeConn) Read(b []byte) (int, error) {
-	if c.oemCP == 0 || c.oemCP == 65001 {
-		return c.out.Read(b)
-	}
-
-	// 1. 先消费已转码完毕但尚未读完的 UTF-8 缓冲区
-	c.mu.Lock()
-	if len(c.readBuf) > 0 {
-		n := copy(b, c.readBuf)
-		c.readBuf = c.readBuf[n:]
-		c.mu.Unlock()
-		return n, nil
-	}
-
-	raw := make([]byte, len(b))
-	var data []byte
-	if len(c.readPending) > 0 {
-		data = append(data, c.readPending...)
-		c.readPending = nil
-	}
-	c.mu.Unlock()
-
-	var outBytes []byte
-
-	for len(outBytes) == 0 {
-		n, err := c.out.Read(raw)
-		if n > 0 {
-			data = append(data, raw[:n]...)
-		}
-		if len(data) == 0 {
-			return 0, err
-		}
-
-		valid, inc := isUTF8(data)
-		if valid {
-			if inc > 0 && err == nil {
-				c.mu.Lock()
-				c.readPending = append(c.readPending, data[len(data)-inc:]...)
-				c.mu.Unlock()
-				data = data[:len(data)-inc]
-			}
-			outBytes = data
-		} else {
-			incTail := gbkIncompleteTail(data)
-			if incTail > 0 && err == nil {
-				c.mu.Lock()
-				c.readPending = append(c.readPending, data[len(data)-incTail:]...)
-				c.mu.Unlock()
-				data = data[:len(data)-incTail]
-			}
-			if len(data) > 0 {
-				outBytes = cpToUTF8(c.oemCP, data)
-			}
-		}
-
-		if len(outBytes) == 0 {
-			if err != nil {
-				c.mu.Lock()
-				if len(c.readPending) > 0 {
-					outBytes = cpToUTF8(c.oemCP, c.readPending)
-					c.readPending = nil
-				}
-				c.mu.Unlock()
-				if len(outBytes) > 0 {
-					break
-				}
-				return 0, err
-			}
-			data = nil
-		}
-	}
-
-	copied := copy(b, outBytes)
-	if copied < len(outBytes) {
-		c.mu.Lock()
-		c.readBuf = append(c.readBuf, outBytes[copied:]...)
-		c.mu.Unlock()
-	}
-	return copied, nil
+	return c.pr.Read(b)
 }
 
 func (c *pipeConn) Write(b []byte) (int, error) {
-	toWrite := normalizeCRLF(b)
-	if c.oemCP != 0 && c.oemCP != 65001 {
-		toWrite = utf8ToCP(c.oemCP, toWrite)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return 0, io.ErrClosedPipe
 	}
-	_, err := c.in.Write(toWrite)
-	if err != nil {
-		return 0, err
+
+	runes := []rune(string(b))
+	for i := 0; i < len(runes); {
+		r := runes[i]
+
+		// 遇到 ANSI Escape 序列（如方向键 \x1b[A 等），跳过并忽略，避免污染行缓冲与屏幕
+		if r == 0x1b {
+			i = skipEscapeSequence(runes, i)
+			continue
+		}
+
+		switch r {
+		case '\r', '\n':
+			// 跳过紧随 \r 后的 \n，避免双重换行
+			if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
+				i++
+			}
+			// 1. 本地回显换行
+			_, _ = c.pw.Write([]byte("\r\n"))
+
+			// 2. 将当前行缓冲拼接 \r\n 并转码写入 cmd.exe 的标准输入管道
+			cmdLine := string(c.lineBuf) + "\r\n"
+			c.lineBuf = c.lineBuf[:0]
+
+			var toWrite []byte
+			if c.oemCP != 0 && c.oemCP != 65001 {
+				toWrite = utf8ToCP(c.oemCP, []byte(cmdLine))
+			} else {
+				toWrite = []byte(cmdLine)
+			}
+			if _, err := c.in.Write(toWrite); err != nil {
+				return 0, err
+			}
+
+		case '\b', 0x7f: // Backspace 退格键
+			if len(c.lineBuf) > 0 {
+				lastRune := c.lineBuf[len(c.lineBuf)-1]
+				c.lineBuf = c.lineBuf[:len(c.lineBuf)-1]
+
+				// 在终端屏幕上擦除字符：单宽字符发 \b \b，双宽（汉字）发 \b\b  \b\b
+				if runeWidth(lastRune) == 2 {
+					_, _ = c.pw.Write([]byte("\b\b  \b\b"))
+				} else {
+					_, _ = c.pw.Write([]byte("\b \b"))
+				}
+			}
+
+		case 0x03: // Ctrl+C 中断
+			c.lineBuf = c.lineBuf[:0]
+			_, _ = c.pw.Write([]byte("^C\r\n"))
+			_, _ = c.in.Write([]byte("\x03\r\n"))
+
+		default:
+			// 普通可打印字符、中文、空格、Tab等
+			if r >= 0x20 || r == '\t' {
+				c.lineBuf = append(c.lineBuf, r)
+				// 实时本地回显到终端屏幕
+				_, _ = c.pw.Write([]byte(string(r)))
+			}
+		}
+		i++
 	}
+
 	return len(b), nil
 }
 
@@ -242,6 +288,12 @@ func (c *pipeConn) Close() error {
 	c.closed = true
 	c.mu.Unlock()
 
+	if c.pw != nil {
+		_ = c.pw.Close()
+	}
+	if c.pr != nil {
+		_ = c.pr.Close()
+	}
 	if c.in != nil {
 		_ = c.in.Close()
 	}
