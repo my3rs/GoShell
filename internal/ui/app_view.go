@@ -66,7 +66,6 @@ type AppView struct {
 	tabs            []WorkspaceTab
 	tabPillReady    bool
 	lastTabRect     ui.Rect
-	selectedHostID  string
 	showHiddenFiles bool
 	prevTabTitles   []string
 
@@ -129,10 +128,6 @@ func NewAppView(application *app.App) *AppView {
 		paneTabIndices:  [4]int{0, 1, 2, 3},
 	}
 
-	// 默认选中第一个主机以便展示详情
-	if len(application.Hosts) > 0 {
-		v.selectedHostID = application.Hosts[0].ID
-	}
 
 	return v
 }
@@ -391,32 +386,19 @@ func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
 	v.showHiddenFiles = activeSession.ShowHidden
 }
 
-// 辅助渲染单行主机项 (复刻 docker-mate 的 Sidebar.MenuButton 选中/悬浮外观，支持右键快捷操作)
+// 辅助渲染单行主机项 (复刻现代侧边栏菜单按钮，仅保留悬停高亮，支持双击连接与右键快捷操作)
 func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 	host := h
-	isSelected := v.selectedHostID == host.ID
-
-	rowBg := ui.Transparent
-	textCol := ColSidebarText
-	nameCol := t.Text
-
-	if isSelected {
-		rowBg = ColSidebarActive
-		textCol = ColSidebarActiveText
-		nameCol = ColSidebarActiveText
-	}
-
 	isLocal := host.AuthType == model.AuthTypeLocal
 
-	row := ui.Row(c).Key(host.ID).Height(38).Background(rowBg).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2))
+	row := ui.Row(c).Key(host.ID).Height(38).Background(ui.Transparent).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2))
 	isHovered := row.Hovered()
-	if !isSelected && isHovered {
+	if isHovered {
 		row.Background(ColSidebarHover)
 	}
 
 	// 右键上下文菜单：切换终端、新建终端、编辑、删除（本地终端受保护不可删除）
 	row.ContextMenu(func(m *ui.Menu) {
-		v.selectedHostID = host.ID
 		openCount := v.getHostSessionCount(host.ID)
 		if openCount > 0 {
 			if m.Item("切换到终端").Chosen() {
@@ -438,9 +420,6 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 		if m.Item("删除主机").Disabled(isLocal).Chosen() {
 			if !isLocal {
 				_ = v.app.Store.DeleteHost(host.ID)
-				if v.selectedHostID == host.ID {
-					v.selectedHostID = ""
-				}
 				_ = v.app.ReloadData()
 			}
 		}
@@ -450,7 +429,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 		// 主机信息
 		ui.Column(c).Grow(1).Gap(1).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-				ui.Text(c, host.Name).FontSize(12).Bold().TextColor(nameCol)
+				ui.Text(c, host.Name).FontSize(12).Bold().TextColor(t.Text)
 				if isLocal {
 					ui.Row(c).Background(ui.Hex("#E0F2FE")).Padding(1, 4).Radius(3).Children(func() {
 						ui.Text(c, "置顶").FontSize(9).Bold().TextColor(ui.Hex("#0369A1"))
@@ -458,9 +437,9 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 				}
 			})
 			if isLocal {
-				ui.Text(c, "本地终端").FontSize(10.5).TextColor(textCol)
+				ui.Text(c, "本地终端").FontSize(10.5).TextColor(ColSidebarText)
 			} else {
-				ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(10.5).TextColor(textCol)
+				ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(10.5).TextColor(ColSidebarText)
 			}
 		})
 
@@ -470,8 +449,6 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 				v.openNewHostSession(host)
 			}
 		}
-	}).OnClick(func() {
-		v.selectedHostID = host.ID
 	})
 	if row.DoubleClicked() {
 		v.openHostSession(host)
@@ -1284,15 +1261,15 @@ func (v *AppView) renderEmptyPane(c *ui.Context, t *ui.Theme, paneIndex int) {
 	})
 }
 
-// 主机属性审查与操作面板 (精简首页：不展示看板数量与功能特性，仅保留添加主机与当前选中主机信息及操作)
+// 主机属性审查与操作面板 (精简首页：平铺展示所有已保存主机的卡片与快捷操作)
 func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 	ui.Scroll(c).Fill().Padding(t.Space(6)).Children(func() {
 		ui.Column(c).Gap(t.Space(4)).Children(func() {
-			// 顶部功能条：仅「+ 添加 SSH 主机」
+			// 顶部功能条：标题与操作按钮
 			ui.Row(c).Height(38).AlignItems(ui.Center).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
 					ui.Icon(c, IconServer).TextColor(t.Accent).Width(16).Height(16)
-					ui.Text(c, "主机控制台").FontSize(15).Bold().TextColor(t.Text)
+					ui.Text(c, fmt.Sprintf("主机控制台 (%d)", len(v.app.Hosts))).FontSize(15).Bold().TextColor(t.Text)
 				})
 
 				ui.Spacer(c)
@@ -1310,107 +1287,99 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 			// 顶栏下方的横线分隔
 			ui.Box(c).Height(1).Background(t.Border)
 
-			// 下方展示当前选中主机的信息和操作（无大外盒包裹，由横线自然分隔）
-			v.renderSelectedHostCard(c, t)
+			// 主机卡片平铺列表
+			if len(v.app.Hosts) == 0 {
+				ui.Column(c).Padding(t.Space(10)).Center().Gap(t.Space(2)).Children(func() {
+					ui.Icon(c, IconServer).TextColor(t.TextMuted).Width(36).Height(36)
+					ui.Text(c, "暂无主机").FontSize(14).Bold().TextColor(t.TextMuted)
+					ui.Text(c, "请点击右上角「+ 添加 SSH 主机」以创建新连接").FontSize(12).TextColor(t.TextMuted)
+				})
+			} else {
+				ui.Column(c).Gap(t.Space(3)).Children(func() {
+					for _, h := range v.app.Hosts {
+						v.renderHostDashboardCard(c, t, h)
+					}
+				})
+			}
 		})
 	})
 }
 
-// 当前选中主机的详细审查内容 (彻底去除大外框盒子，由横线自然分段)
-func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
-	var host *model.Host
-	if v.selectedHostID != "" {
-		for _, h := range v.app.Hosts {
-			if h.ID == v.selectedHostID {
-				host = h
-				break
-			}
-		}
+// 辅助渲染控制台单个主机平铺卡片
+func (v *AppView) renderHostDashboardCard(c *ui.Context, t *ui.Theme, host *model.Host) {
+	isLocal := host.AuthType == model.AuthTypeLocal
+
+	card := ui.Column(c).Key(host.ID).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Padding(t.Space(3.5), t.Space(4)).Gap(t.Space(2.5))
+	if card.Hovered() {
+		card.Border(1, ui.Hex("#CBD5E1"))
 	}
 
-	if host == nil {
-		ui.Column(c).Padding(t.Space(10)).Center().Gap(t.Space(2)).Children(func() {
-			ui.Icon(c, IconServer).TextColor(t.TextMuted).Width(36).Height(36)
-			ui.Text(c, "未选择主机").FontSize(14).Bold().TextColor(t.TextMuted)
-			ui.Text(c, "请在左侧列表中点击选择一台主机查看配置，或点击「添加 SSH 主机」新建").FontSize(12).TextColor(t.TextMuted)
-		})
-		return
-	}
-
-	ui.Column(c).Gap(t.Space(5)).Children(func() {
-		// 1. 主机名与操作按钮栏
+	card.Children(func() {
+		// 1. 标题与操作栏
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
-			ui.Column(c).Gap(t.Space(1)).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-					ui.Text(c, host.Name).FontSize(18).Bold().TextColor(t.Text)
-					// 就绪绿色药丸徽章
-					ui.Row(c).Background(ColBadgeGreenBg).Padding(2, 8).Radius(t.Radius).Children(func() {
-						ui.Text(c, "就绪").FontSize(10.5).Bold().TextColor(ColBadgeGreenText)
+			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				ui.Text(c, host.Name).FontSize(15).Bold().TextColor(t.Text)
+				if isLocal {
+					ui.Row(c).Background(ui.Hex("#E0F2FE")).Padding(1, 6).Radius(3).Children(func() {
+						ui.Text(c, "本地终端").FontSize(10).Bold().TextColor(ui.Hex("#0369A1"))
 					})
-				})
-
-				if host.AuthType == model.AuthTypeLocal {
-					ui.Text(c, fmt.Sprintf("本地终端 (%s)", host.Description)).FontSize(12).TextColor(t.TextMuted)
 				} else {
-					ui.Text(c, fmt.Sprintf("%s (%s:%d)", host.Description, host.Address, host.Port)).FontSize(12).TextColor(t.TextMuted)
+					ui.Row(c).Background(ColBadgeGreenBg).Padding(1, 6).Radius(3).Children(func() {
+						ui.Text(c, "就绪").FontSize(10).Bold().TextColor(ColBadgeGreenText)
+					})
+				}
+				if host.Description != "" {
+					ui.Text(c, host.Description).FontSize(11.5).TextColor(t.TextMuted)
 				}
 			})
 
 			ui.Spacer(c)
 
 			ui.Row(c).Gap(t.Space(2)).Children(func() {
-				if ui.Button(c, "编辑").Clicked() {
+				if ui.PrimaryButton(c, "连接").Height(28).Padding(0, 12).FontSize(12).Clicked() {
+					v.openNewHostSession(host)
+				}
+				if ui.Button(c, "编辑").Height(28).Padding(0, 10).FontSize(12).Clicked() {
 					v.openEditModal(host)
 				}
-				if host.AuthType != model.AuthTypeLocal {
-					if ui.Button(c, "删除主机").Clicked() {
+				if !isLocal {
+					if ui.Button(c, "删除").Height(28).Padding(0, 10).FontSize(12).Clicked() {
 						_ = v.app.Store.DeleteHost(host.ID)
-						v.selectedHostID = ""
 						_ = v.app.ReloadData()
 					}
 				}
-				if ui.PrimaryButton(c, "连接").Clicked() {
-					v.openNewHostSession(host)
-				}
 			})
 		})
 
-		// 模块间横线分隔
-		ui.Box(c).Height(1).Background(t.Border)
-
-		// 2. 属性配置明细
-		ui.Column(c).Gap(t.Space(4)).Children(func() {
-			ui.Text(c, "连接配置与安全认证").FontSize(13).Bold().TextColor(t.Text)
-
-			// 属性行 1
-			ui.Row(c).Gap(t.Space(8)).Children(func() {
-				v.renderFieldItem(c, t, "主机别名", host.Name)
-				v.renderFieldItem(c, t, "主机地址", host.Address)
-				v.renderFieldItem(c, t, "SSH 端口", strconv.Itoa(host.Port))
-			})
-
-			// 属性行 2
-			ui.Row(c).Gap(t.Space(8)).Children(func() {
-				v.renderFieldItem(c, t, "登录用户名", host.Username)
-				v.renderFieldItem(c, t, "认证方式", string(host.AuthType))
-				if host.AuthType == model.AuthTypeKeyFile {
-					v.renderFieldItem(c, t, "私钥路径", host.KeyPath)
-				} else if host.AuthType == model.AuthTypeLocal {
-					v.renderFieldItem(c, t, "终端类型", "系统原生 Shell (zsh/bash/PowerShell)")
-				} else {
-					v.renderFieldItem(c, t, "密码状态", "AES-256 已加密保存")
-				}
-			})
+		// 2. 详细连接参数行
+		ui.Row(c).Gap(t.Space(6)).AlignItems(ui.Center).Children(func() {
+			if isLocal {
+				ui.Row(c).Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "终端类型:").FontSize(11).TextColor(t.TextMuted)
+					ui.Text(c, "系统原生 Shell").FontSize(11).Bold().TextColor(t.Text)
+				})
+			} else {
+				ui.Row(c).Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "地址:").FontSize(11).TextColor(t.TextMuted)
+					ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(11).Bold().TextColor(t.Text)
+				})
+				ui.Row(c).Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "认证:").FontSize(11).TextColor(t.TextMuted)
+					authText := "密码 (AES-256 加密)"
+					if host.AuthType == model.AuthTypeKeyFile {
+						authText = "私钥文件"
+						if host.KeyPath != "" {
+							authText += fmt.Sprintf(" (%s)", host.KeyPath)
+						}
+					}
+					ui.Text(c, authText).FontSize(11).Bold().TextColor(t.Text)
+				})
+			}
 		})
 	})
-}
-
-// 辅助渲染单项属性
-func (v *AppView) renderFieldItem(c *ui.Context, t *ui.Theme, label, value string) {
-	ui.Column(c).Width(180).Gap(t.Space(0.5)).Children(func() {
-		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted)
-		ui.Text(c, value).FontSize(12).Bold().TextColor(t.Text)
-	})
+	if card.DoubleClicked() {
+		v.openHostSession(host)
+	}
 }
 
 // getLocalIP 获取本机局域网有效 IPv4 地址
@@ -1444,14 +1413,6 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 	activeSession := v.getActiveSession()
 	if activeSession != nil && activeSession.Host.AuthType != model.AuthTypeLocal && activeSession.Host.Address != "" {
 		ipText = fmt.Sprintf("节点: %s | 本机: %s", activeSession.Host.Address, v.localIP)
-	} else if v.selectedHostID != "" {
-		// 否则若选中了远程主机，显示选中节点的 IP
-		for _, h := range v.app.Hosts {
-			if h.ID == v.selectedHostID && h.AuthType != model.AuthTypeLocal && h.Address != "" {
-				ipText = fmt.Sprintf("节点: %s | 本机: %s", h.Address, v.localIP)
-				break
-			}
-		}
 	}
 
 	ui.Row(c).Height(26).Background(ColSidebarBg).Padding(0, t.Space(3)).AlignItems(ui.Center).Border(1, ColSidebarBorder).Children(func() {
@@ -2009,7 +1970,6 @@ func (v *AppView) saveHostForm() {
 	}
 
 	_ = v.app.ReloadData()
-	v.selectedHostID = h.ID
 	v.modalOpen = false
 }
 
@@ -2099,7 +2059,6 @@ func (v *AppView) openHostSession(h *model.Host) {
 	for i, t := range v.tabs {
 		if t.Type == TabTypeSession && t.Session != nil && t.Session.Host.ID == h.ID {
 			v.switchActivePaneToTab(i)
-			v.selectedHostID = h.ID
 			return
 		}
 	}
@@ -2161,7 +2120,6 @@ func (v *AppView) openNewHostSession(h *model.Host) {
 		Session: session,
 	})
 	v.switchActivePaneToTab(len(v.tabs) - 1)
-	v.selectedHostID = h.ID
 	v.updateHostTabTitles(h.ID)
 	session.Start()
 }

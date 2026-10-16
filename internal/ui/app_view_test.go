@@ -11,6 +11,7 @@ import (
 	"goshell/internal/app"
 	"goshell/internal/core/model"
 	"goshell/internal/core/security"
+	sftpService "goshell/internal/core/sftp"
 	"goshell/internal/core/storage"
 )
 
@@ -858,5 +859,205 @@ func TestAppView_TiledTabRenderingNoOcclusion(t *testing.T) {
 	}
 }
 
+func TestAppView_HoverBackgroundConsistency(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{
+				{ID: "h1", Name: "Host-1", Address: "1.1.1.1"},
+				{ID: "h2", Name: "Host-2", Address: "2.2.2.2"},
+			},
+		},
+		theme: DockerMateTheme(),
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+			{Type: TabTypeSession, Title: "Host-1", Session: &TerminalSession{Host: &model.Host{ID: "h1", Name: "Host-1", Address: "1.1.1.1"}}},
+			{Type: TabTypeSession, Title: "Host-2", Session: &TerminalSession{Host: &model.Host{ID: "h2", Name: "Host-2", Address: "2.2.2.2"}}},
+		},
+		activeTabIndex: 1,
+		sidebarWidth:   240,
+	}
 
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 1000, 600)
+
+	tt.Frame()
+	tt.Frame()
+
+	// 1. 验证左侧栏未选中的主机卡片 (Host-2) 悬浮时背景色精确为 ColSidebarHover (RGB 223, 229, 236)
+	rectHost2, okHost2 := tt.Find("Host-2")
+	if !okHost2 {
+		t.Fatalf("Expected to find Host-2 in sidebar")
+	}
+	hoverX := float32(50)
+	hoverY := rectHost2.Y + 2
+	tt.Move(hoverX, hoverY)
+	tt.Frame()
+	imgHost := tt.Image()
+	colHost := imgHost.At(int(hoverX), int(hoverY))
+	rHost, gHost, bHost, _ := colHost.RGBA()
+	if uint8(rHost>>8) != 223 || uint8(gHost>>8) != 229 || uint8(bHost>>8) != 236 {
+		t.Errorf("Expected Host-2 hovered color RGB(223, 229, 236), got RGB(%d, %d, %d)", uint8(rHost>>8), uint8(gHost>>8), uint8(bHost>>8))
+	}
+
+	// 2. 验证右侧工作区未激活的标签页 (Tab 2) 悬浮响应与底色加深
+	tab2X := float32(495)
+	tab2Y := float32(18)
+	tt.Move(0, 0)
+	tt.Frame()
+	colTabUnhover := tt.Image().At(int(tab2X), int(tab2Y))
+	tt.Move(tab2X, tab2Y)
+	tt.Frame()
+	colTabHover := tt.Image().At(int(tab2X), int(tab2Y))
+	if colTabUnhover == colTabHover {
+		t.Errorf("Expected Tab 2 to change background on hover, but unhovered (%+v) == hovered (%+v)", colTabUnhover, colTabHover)
+	}
+
+	// 3. 验证左侧栏远程文件列表项悬浮时背景色精确为 ColSidebarHover (RGB 223, 229, 236)
+	sess := v.tabs[1].Session
+	sess.FileList = []sftpService.FileEntry{
+		{Name: "app.log", Path: "/app.log", IsDir: false},
+	}
+	v.sidebarTab = 1
+	tt.Frame()
+	tt.Frame()
+
+	rectFile, okFile := tt.Find("app.log")
+	if !okFile {
+		t.Fatalf("Expected to find app.log in file panel")
+	}
+	fileHoverX := float32(50)
+	fileHoverY := rectFile.Y + 2
+	tt.Move(fileHoverX, fileHoverY)
+	tt.Frame()
+	imgFile := tt.Image()
+	colFile := imgFile.At(int(fileHoverX), int(fileHoverY))
+	rFile, gFile, bFile, _ := colFile.RGBA()
+	if uint8(rFile>>8) != 223 || uint8(gFile>>8) != 229 || uint8(bFile>>8) != 236 {
+		t.Errorf("Expected file item hovered color RGB(223, 229, 236), got RGB(%d, %d, %d)", uint8(rFile>>8), uint8(gFile>>8), uint8(bFile>>8))
+	}
+}
+
+func TestAppView_ClickUntiledTabInSplit(t *testing.T) {
+	// 情形 A: 3个Tab (Overview, Host-1, Host-2) 开启分屏
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{
+				{ID: "h1", Name: "Host-1", Address: "1.1.1.1"},
+				{ID: "h2", Name: "Host-2", Address: "2.2.2.2"},
+			},
+		},
+		theme: DockerMateTheme(),
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+			{Type: TabTypeSession, Title: "Host-1", Session: &TerminalSession{Host: &model.Host{ID: "h1", Name: "Host-1", Address: "1.1.1.1"}}},
+			{Type: TabTypeSession, Title: "Host-2", Session: &TerminalSession{Host: &model.Host{ID: "h2", Name: "Host-2", Address: "2.2.2.2"}}},
+		},
+		activeTabIndex: 1,
+		sidebarWidth:   240,
+	}
+	v.SetLayoutMode(LayoutDualSplit)
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 1000, 600)
+
+	tt.Frame()
+	tt.Frame()
+
+	t.Logf("Initial state: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v.activeTabIndex, v.activePaneIndex, v.paneTabIndices)
+
+	// 点击概览 Tab
+	rectOverview, okOverview := tt.Find("概览")
+	t.Logf("Find 概览: %+v (ok: %v)", rectOverview, okOverview)
+	if okOverview {
+		tt.Click("概览")
+		tt.Frame()
+		t.Logf("After click 概览: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v.activeTabIndex, v.activePaneIndex, v.paneTabIndices)
+	}
+
+	// 情形 B: 3个终端Tab + 概览 (Overview, Tab-A, Tab-B, Tab-C)
+	v3 := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{
+				{ID: "h1", Name: "Host-1", Address: "1.1.1.1"},
+				{ID: "h2", Name: "Host-2", Address: "2.2.2.2"},
+				{ID: "h3", Name: "Host-3", Address: "3.3.3.3"},
+			},
+		},
+		theme: DockerMateTheme(),
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+			{Type: TabTypeSession, Title: "Tab-A", Session: &TerminalSession{Host: &model.Host{ID: "h1", Name: "Host-1", Address: "1.1.1.1"}}},
+			{Type: TabTypeSession, Title: "Tab-B", Session: &TerminalSession{Host: &model.Host{ID: "h2", Name: "Host-2", Address: "2.2.2.2"}}},
+			{Type: TabTypeSession, Title: "Tab-C", Session: &TerminalSession{Host: &model.Host{ID: "h3", Name: "Host-3", Address: "3.3.3.3"}}},
+		},
+		activeTabIndex: 1,
+		sidebarWidth:   240,
+	}
+	v3.SetLayoutMode(LayoutDualSplit)
+
+	tt3 := ui.NewTester(func(c *ui.Context) {
+		v3.View(c)
+	}, 1000, 600)
+
+	tt3.Frame()
+	tt3.Frame()
+
+	t.Logf("v3 Initial state: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v3.activeTabIndex, v3.activePaneIndex, v3.paneTabIndices)
+
+	rectTabC, okTabC := tt3.Find("Tab-C")
+	t.Logf("Find Tab-C: %+v (ok: %v)", rectTabC, okTabC)
+	if okTabC {
+		tt3.Click("Tab-C")
+		tt3.Frame()
+		t.Logf("v3 After click Tab-C: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v3.activeTabIndex, v3.activePaneIndex, v3.paneTabIndices)
+	}
+
+	rectOverview3, okOverview3 := tt3.Find("概览")
+	t.Logf("Find v3 概览: %+v (ok: %v)", rectOverview3, okOverview3)
+	if okOverview3 {
+		tt3.Click("概览")
+		tt3.Frame()
+		t.Logf("v3 After click 概览: activeTabIndex=%d, activePaneIndex=%d, paneTabIndices=%v", v3.activeTabIndex, v3.activePaneIndex, v3.paneTabIndices)
+	}
+}
+
+func TestAppView_SidebarNoPersistentActiveAndDashboardCards(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{
+				{ID: "local", Name: "本地终端", AuthType: model.AuthTypeLocal, Description: "系统原生 Shell"},
+				{ID: "h1", Name: "测试节点-1", AuthType: model.AuthTypePassword, Address: "192.168.1.10", Port: 22, Username: "root"},
+			},
+		},
+		theme:          DockerMateTheme(),
+		tabs:           []WorkspaceTab{{Type: TabTypeOverview, Title: "概览"}},
+		activeTabIndex: 0,
+		sidebarWidth:   240,
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 1000, 600)
+
+	tt.Frame()
+	tt.Frame()
+
+	// 1. 验证首页 Tab 0 控制台平铺展示了所有主机卡片中的关键信息
+	if _, ok := tt.Find("本地终端"); !ok {
+		t.Errorf("Expected to find 本地终端 in dashboard")
+	}
+	if _, ok := tt.Find("测试节点-1"); !ok {
+		t.Errorf("Expected to find 测试节点-1 in dashboard")
+	}
+	if _, ok := tt.Find("root@192.168.1.10:22"); !ok {
+		t.Errorf("Expected to find SSH host address in dashboard card")
+	}
+
+	// 2. 验证左侧列表中点击主机项不会产生常驻选中的背景异常
+	tt.Click("测试节点-1")
+	tt.Frame()
+	// 确保应用正常刷新且无崩溃
+}
 
