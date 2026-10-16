@@ -100,7 +100,7 @@ func TestStorage_GroupAndHostCRUD(t *testing.T) {
 	// 7. 测试本地终端保护：不可删除
 	localHost := &model.Host{
 		GroupID:  grp.ID,
-		Name:     "本地终端 (Local)",
+		Name:     "本地终端",
 		Address:  "localhost",
 		AuthType: model.AuthTypeLocal,
 	}

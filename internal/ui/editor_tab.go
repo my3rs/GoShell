@@ -249,7 +249,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 				ui.Text(c, "该文件为二进制格式，不支持在线代码就地编辑").FontSize(15).Bold().TextColor(t.Text)
 				ui.Text(c, "在线编辑器专为 Shell 脚本、配置文件、Python、Go、JSON、YAML、SQL 等文本文件设计。").FontSize(12).TextColor(t.TextMuted)
 				if ef.Session != nil && ef.Session.ShouldShowTransferQueue() {
-					if ui.PrimaryButton(c, "下载到本地 (~/Downloads)").Clicked() {
+					if ui.PrimaryButton(c, "下载到本地").Clicked() {
 						ef.Session.DownloadEntry(sftpService.FileEntry{
 							Name: ef.Name,
 							Path: ef.Path,

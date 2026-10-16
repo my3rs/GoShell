@@ -610,7 +610,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				if m.Item("新建 SSH 主机...").Chosen() {
 					v.openCreateModal()
 				}
-				if m.Item("打开本地终端 (新标签)").Chosen() {
+				if m.Item("打开本地终端").Chosen() {
 					v.openNewLocalTerminal()
 				}
 				if len(v.app.Hosts) > 0 {
@@ -742,7 +742,7 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 					c.WriteClipboard(h.Address)
 				}
 			}
-			if m.Item("新建此主机终端 (新Tab)").Chosen() {
+			if m.Item("新建此主机终端").Chosen() {
 				v.openNewHostSession(h)
 			}
 			if h.IsEphemeral {
@@ -763,7 +763,7 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 				c.WriteClipboard(tab.Editor.Name)
 			}
 			if tab.Session != nil && tab.Session.Host != nil {
-				if m.Item("打开所属主机终端 (新Tab)").Chosen() {
+				if m.Item("打开所属主机终端").Chosen() {
 					v.openNewHostSession(tab.Session.Host)
 				}
 			}
@@ -788,7 +788,7 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 		v.switchActivePaneToTab(index)
 		v.SetLayoutMode(LayoutDualSplit)
 	}
-	if m.Item("四宫格布局 (2x2)").Chosen() {
+	if m.Item("四宫格布局").Chosen() {
 		v.switchActivePaneToTab(index)
 		v.SetLayoutMode(LayoutQuadGrid)
 	}
@@ -845,9 +845,9 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 			ui.Text(c, tab.Title).FontSize(12).Bold().TextColor(textColor).SingleLine()
 			// 连接中或已断开状态徽记
 			if tab.Session.Connecting {
-				ui.Text(c, "(连接中)").FontSize(9.5).TextColor(t.Warning)
+				ui.Text(c, "连接中").FontSize(9.5).TextColor(t.Warning)
 			} else if !tab.Session.Connected {
-				ui.Text(c, "(断开)").FontSize(9.5).TextColor(t.Danger)
+				ui.Text(c, "已断开").FontSize(9.5).TextColor(t.Danger)
 			}
 		} else {
 			ui.Icon(c, IconTerminal).Width(12).Height(12).TextColor(textColor)
@@ -1212,7 +1212,7 @@ func (v *AppView) renderEmptyPane(c *ui.Context, t *ui.Theme, paneIndex int) {
 	}
 	emptyBox.Children(func() {
 		ui.Icon(c, IconTerminal).Width(32).Height(32).TextColor(ui.Hex("#475569"))
-		ui.Text(c, fmt.Sprintf("终端平铺窗格 (P%d 空位)", paneIndex+1)).FontSize(13).Bold().TextColor(ui.Hex("#94A3B8"))
+		ui.Text(c, fmt.Sprintf("分屏窗格 %d", paneIndex+1)).FontSize(13).Bold().TextColor(ui.Hex("#94A3B8"))
 		ui.Row(c).Gap(t.Space(2)).Children(func() {
 			if ui.Button(c, "+ 本地终端").Clicked() {
 				v.activePaneIndex = paneIndex
@@ -1299,7 +1299,7 @@ func (v *AppView) renderSelectedHostCard(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, host.Name).FontSize(18).Bold().TextColor(t.Text)
 					// 就绪绿色药丸徽章
 					ui.Row(c).Background(ColBadgeGreenBg).Padding(2, 8).Radius(t.Radius).Children(func() {
-						ui.Text(c, "就绪 (READY)").FontSize(10.5).Bold().TextColor(ColBadgeGreenText)
+						ui.Text(c, "就绪").FontSize(10.5).Bold().TextColor(ColBadgeGreenText)
 					})
 				})
 
@@ -1519,8 +1519,8 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, "SSH 登录密码:").FontSize(11.5).Bold().TextColor(t.Text)
 					ui.TextInput(c, &v.formPassword)
 				} else {
-					ui.Text(c, "私钥绝对路径 (如 ~/.ssh/id_rsa):").FontSize(11.5).Bold().TextColor(t.Text)
-					ui.TextInput(c, &v.formKeyPath)
+					ui.Text(c, "私钥路径:").FontSize(11.5).Bold().TextColor(t.Text)
+					ui.TextInput(c, &v.formKeyPath).Placeholder("~/.ssh/id_rsa")
 				}
 			} else {
 				// 本地 Shell 类型分段单选
@@ -1844,7 +1844,7 @@ func (v *AppView) renderQuickConnectModal(c *ui.Context, t *ui.Theme) {
 					})
 					ui.Column(c).Grow(1).Gap(4).Children(func() {
 						ui.Text(c, "密码").FontSize(12).TextColor(t.Text)
-						ui.TextInput(c, &v.quickConnectPassword).Password().Placeholder("密码 (可选)")
+						ui.TextInput(c, &v.quickConnectPassword).Password().Placeholder("可选")
 					})
 				})
 

@@ -123,7 +123,7 @@ func (a *App) seedDefaultData() {
 
 	a.Store.SaveHost(&model.Host{
 		GroupID:     groupID,
-		Name:        "本机终端 (Local)",
+		Name:        "本机终端",
 		Address:     "localhost",
 		Port:        0,
 		Username:    "local",
@@ -150,7 +150,7 @@ func (a *App) ensureLocalHost() {
 
 	_ = a.Store.SaveHost(&model.Host{
 		GroupID:     targetGroupID,
-		Name:        "本机终端 (Local)",
+		Name:        "本机终端",
 		Address:     "localhost",
 		Port:        0,
 		Username:    "local",
