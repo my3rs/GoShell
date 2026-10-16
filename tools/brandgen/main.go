@@ -41,74 +41,8 @@ func (p path) svg() string {
 	return b.String()
 }
 
-// One geometry source serves every vector and raster variant.
+// GO Terminal 矩形外框：右侧开口向内回折形成 G，整体轮廓形成 O。
 var shell = path{
-	// A light, nearly circular G with restrained rounded terminals.
-	{'M', []float32{46.95, 15.95}},
-	{'C', []float32{43.05, 12.05, 37.75, 10, 32, 10}},
-	{'C', []float32{19.85, 10, 10, 19.85, 10, 32}},
-	{'C', []float32{10, 44.15, 19.85, 54, 32, 54}},
-	{'C', []float32{38.85, 54, 45, 51, 49.15, 46.25}},
-	{'C', []float32{51.35, 43.7, 53, 40.4, 53, 37}},
-	{'L', []float32{53, 32}},
-	{'C', []float32{53, 30.481, 51.769, 29.25, 50.25, 29.25}},
-	{'L', []float32{43.75, 29.25}},
-	{'C', []float32{42.231, 29.25, 41, 30.481, 41, 32}},
-	{'C', []float32{41, 33.519, 42.231, 34.75, 43.75, 34.75}},
-	{'L', []float32{47.5, 34.75}}, {'L', []float32{47.5, 37}},
-	{'C', []float32{47.5, 43.2, 40.6, 48.5, 32, 48.5}},
-	{'C', []float32{22.887, 48.5, 15.5, 41.113, 15.5, 32}},
-	{'C', []float32{15.5, 22.887, 22.887, 15.5, 32, 15.5}},
-	{'C', []float32{36.4, 15.5, 40.3, 17, 43.1, 19.7}},
-	{'C', []float32{44.17, 20.77, 45.88, 20.77, 46.95, 19.7}},
-	{'C', []float32{48.02, 18.63, 48.02, 17.02, 46.95, 15.95}}, {'Z', nil},
-}
-var prompt = path{
-	// Keep the large prompt, but balance its weight against the enclosing G.
-	{'M', []float32{25.802, 21.481}},
-	{'L', []float32{36.302, 30.481}},
-	{'Q', []float32{38.075, 32, 36.302, 33.519}},
-	{'L', []float32{25.802, 42.519}},
-	{'C', []float32{24.963, 43.238, 23.701, 43.14, 22.981, 42.302}},
-	{'C', []float32{22.262, 41.463, 22.364, 40.201, 23.198, 39.481}},
-	{'L', []float32{31.927, 32}}, {'L', []float32{23.198, 24.519}},
-	{'C', []float32{22.364, 23.799, 22.262, 22.537, 22.981, 21.698}},
-	{'C', []float32{23.701, 20.862, 24.963, 20.762, 25.802, 21.481}}, {'Z', nil},
-}
-var tile = path{
-	{'M', []float32{16, 0}}, {'L', []float32{48, 0}},
-	{'C', []float32{58, 0, 64, 6, 64, 16}}, {'L', []float32{64, 48}},
-	{'C', []float32{64, 58, 58, 64, 48, 64}}, {'L', []float32{16, 64}},
-	{'C', []float32{6, 64, 0, 58, 0, 48}}, {'L', []float32{0, 16}},
-	{'C', []float32{0, 6, 6, 0, 16, 0}}, {'Z', nil},
-}
-
-// The alternative identity is an open terminal frame and a command prompt.
-// It uses the interface's primary blue instead of a letter monogram.
-var terminalFrame = path{
-	{'M', []float32{40, 12}}, {'L', []float32{20, 12}},
-	{'C', []float32{13.925, 12, 9, 16.925, 9, 23}},
-	{'L', []float32{9, 41}},
-	{'C', []float32{9, 47.075, 13.925, 52, 20, 52}},
-	{'L', []float32{44, 52}},
-	{'C', []float32{50.075, 52, 55, 47.075, 55, 41}},
-	{'L', []float32{55, 30}},
-	{'C', []float32{55, 28.757, 53.993, 27.75, 52.75, 27.75}},
-	{'C', []float32{51.507, 27.75, 50.5, 28.757, 50.5, 30}},
-	{'L', []float32{50.5, 41}},
-	{'C', []float32{50.5, 44.594, 47.594, 47.5, 44, 47.5}},
-	{'L', []float32{20, 47.5}},
-	{'C', []float32{16.406, 47.5, 13.5, 44.594, 13.5, 41}},
-	{'L', []float32{13.5, 23}},
-	{'C', []float32{13.5, 19.406, 16.406, 16.5, 20, 16.5}},
-	{'L', []float32{40, 16.5}},
-	{'C', []float32{41.243, 16.5, 42.25, 15.493, 42.25, 14.25}},
-	{'C', []float32{42.25, 13.007, 41.243, 12, 40, 12}}, {'Z', nil},
-}
-
-// A nearly closed rectangular O, with the lower lip of its right-hand
-// opening folded inward to suggest G. The terminal prompt stays independent.
-var terminalGOFrame = path{
 	{'M', []float32{44, 29.25}}, {'L', []float32{52.75, 29.25}},
 	{'C', []float32{53.993, 29.25, 55, 30.257, 55, 31.5}},
 	{'L', []float32{55, 41}},
@@ -132,13 +66,36 @@ var terminalGOFrame = path{
 	{'C', []float32{42.757, 33.75, 41.75, 32.743, 41.75, 31.5}},
 	{'C', []float32{41.75, 30.257, 42.757, 29.25, 44, 29.25}}, {'Z', nil},
 }
-var terminalCursor = path{
+
+var promptChevron = path{
+	{'M', []float32{25.802, 21.481}},
+	{'L', []float32{36.302, 30.481}},
+	{'Q', []float32{38.075, 32, 36.302, 33.519}},
+	{'L', []float32{25.802, 42.519}},
+	{'C', []float32{24.963, 43.238, 23.701, 43.14, 22.981, 42.302}},
+	{'C', []float32{22.262, 41.463, 22.364, 40.201, 23.198, 39.481}},
+	{'L', []float32{31.927, 32}}, {'L', []float32{23.198, 24.519}},
+	{'C', []float32{22.364, 23.799, 22.262, 22.537, 22.981, 21.698}},
+	{'C', []float32{23.701, 20.862, 24.963, 20.762, 25.802, 21.481}}, {'Z', nil},
+}
+
+var promptCursor = path{
 	{'M', []float32{37.25, 38}}, {'L', []float32{43.25, 38}},
 	{'C', []float32{44.493, 38, 45.5, 39.007, 45.5, 40.25}},
 	{'C', []float32{45.5, 41.493, 44.493, 42.5, 43.25, 42.5}},
 	{'L', []float32{37.25, 42.5}},
 	{'C', []float32{36.007, 42.5, 35, 41.493, 35, 40.25}},
 	{'C', []float32{35, 39.007, 36.007, 38, 37.25, 38}}, {'Z', nil},
+}
+
+var prompt path
+
+var tile = path{
+	{'M', []float32{16, 0}}, {'L', []float32{48, 0}},
+	{'C', []float32{58, 0, 64, 6, 64, 16}}, {'L', []float32{64, 48}},
+	{'C', []float32{64, 58, 58, 64, 48, 64}}, {'L', []float32{16, 64}},
+	{'C', []float32{6, 64, 0, 58, 0, 48}}, {'L', []float32{0, 16}},
+	{'C', []float32{0, 6, 6, 0, 16, 0}}, {'Z', nil},
 }
 
 func transformPath(p path, scale, dx, dy float32) path {
@@ -199,18 +156,24 @@ func paint(dst *image.RGBA, p path, fill color.Color, scale, dx, dy float32) {
 }
 
 var (
-	inkHex        = "#18283B"
-	accentHex     = "#6387BF"
-	pearlHex      = "#F4F7FA"
-	wordHex       = "#18283B"
-	darkAccentHex = "#6387BF"
+	inkHex        = "#0366D6"
+	accentHex     = "#0366D6"
+	pearlHex      = "#FFFFFF"
+	wordHex       = "#111319"
+	darkAccentHex = "#FFFFFF"
 )
 
-var ink = color.RGBA{24, 40, 59, 255}
-var accent = color.RGBA{99, 135, 191, 255}
-var pearl = color.RGBA{244, 247, 250, 255}
-var wordColor = ink
-var darkAccent = accent
+var (
+	ink        = color.RGBA{3, 102, 214, 255}
+	accent     = color.RGBA{3, 102, 214, 255}
+	pearl      = color.RGBA{255, 255, 255, 255}
+	wordColor  = color.RGBA{17, 19, 25, 255}
+	darkAccent = color.RGBA{255, 255, 255, 255}
+)
+
+func init() {
+	prompt = append(transformPath(promptChevron, .8, 2, 7), promptCursor...)
+}
 
 func appIcon(size int) *image.RGBA {
 	im := image.NewRGBA(image.Rect(0, 0, size, size))
@@ -309,31 +272,9 @@ func desktopIcons() {
 }
 
 func main() {
-	concept := flag.String("concept", "terminal-go", "Identity concept: g, terminal or terminal-go")
-	target := flag.String("out", "", "Output directory (defaults to the concept's own directory)")
+	target := flag.String("out", "assets/brand", "Output directory")
 	flag.Parse()
-	switch *concept {
-	case "g":
-		out = "assets/brand/concepts/g"
-	case "terminal", "terminal-go":
-		out = "assets/brand/concepts/terminal"
-		shell = terminalFrame
-		if *concept == "terminal-go" {
-			out = "assets/brand"
-			shell = terminalGOFrame
-		}
-		prompt = append(transformPath(prompt, .8, 2, 7), terminalCursor...)
-		inkHex, accentHex, pearlHex = "#0366D6", "#0366D6", "#FFFFFF"
-		wordHex, darkAccentHex = "#111319", "#FFFFFF"
-		ink = color.RGBA{3, 102, 214, 255}
-		accent, pearl, darkAccent = ink, color.RGBA{255, 255, 255, 255}, color.RGBA{255, 255, 255, 255}
-		wordColor = color.RGBA{17, 19, 25, 255}
-	default:
-		panic("unknown concept: " + *concept)
-	}
-	if *target != "" {
-		out = *target
-	}
+	out = *target
 	must(os.MkdirAll(out, 0o755))
 	write("logo.svg", svg(64, 64, mark(inkHex, accentHex)))
 	write("logo-dark.svg", svg(64, 64, mark(pearlHex, darkAccentHex)))

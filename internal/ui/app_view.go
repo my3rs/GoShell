@@ -515,7 +515,11 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 
 		var targetRect ui.Rect
 		foundActive := false
-		var tiledRects []ui.Rect
+		type tiledTabBg struct {
+			rect  ui.Rect
+			color ui.Color
+		}
+		var tiledBgs []tiledTabBg
 
 		tabBar.Children(func() {
 			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符 (高度与各 Tab 严格水平居中对齐)
@@ -597,7 +601,11 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				} else if isTiled {
 					bounds := tabCard.LayoutBounds()
 					if bounds.W > 0 {
-						tiledRects = append(tiledRects, bounds)
+						bgCol := ui.Hex("#F1F5F9") // 平铺态默认淡灰底色
+						if tabCard.Hovered() {
+							bgCol = ui.Hex("#DFE5EC") // 平铺态鼠标悬停时高亮反馈
+						}
+						tiledBgs = append(tiledBgs, tiledTabBg{rect: bounds, color: bgCol})
 					}
 				}
 
@@ -666,7 +674,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			v.lastTabRect = targetRect
 		}
 
-		if len(tiledRects) > 0 || (v.tabPillReady && v.lastTabRect.W > 0) {
+		if len(tiledBgs) > 0 || (v.tabPillReady && v.lastTabRect.W > 0) {
 			targetX := v.lastTabRect.X
 			targetW := v.lastTabRect.W
 			pillX := tabBar.AnimateWith("ws_tab_pill_x", targetX, 180*time.Millisecond, ui.EaseOut)
@@ -675,9 +683,9 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			pillH := v.lastTabRect.H
 
 			tabBar.Draw(func(p *ui.Painter, r ui.Rect) {
-				// 1. 先绘制平铺未聚焦 Tab 的淡灰卡片底色 (处于底层)
-				for _, tr := range tiledRects {
-					p.Fill(tr, ui.Hex("#F1F5F9"), t.Radius-2)
+				// 1. 先绘制平铺未聚焦 Tab 的淡灰卡片底色 (处于底层，支持悬停高亮反馈)
+				for _, tb := range tiledBgs {
+					p.Fill(tb.rect, tb.color, t.Radius-2)
 				}
 
 				// 2. 绘制当前激活 Tab 的滑动白底滑块 (覆盖在上层，圆角与投影保持完整，绝不被遮挡)
@@ -805,22 +813,7 @@ func (v *AppView) renderTabContextMenu(m *ui.Menu, c *ui.Context, tab WorkspaceT
 		m.Separator()
 	}
 
-	// 4. 快速分屏布局切换
-	if m.Item("单视窗").Chosen() {
-		v.switchActivePaneToTab(index)
-		v.SetLayoutMode(LayoutSingle)
-	}
-	if m.Item("左右分屏").Chosen() {
-		v.switchActivePaneToTab(index)
-		v.SetLayoutMode(LayoutDualSplit)
-	}
-	if m.Item("四宫格分屏").Chosen() {
-		v.switchActivePaneToTab(index)
-		v.SetLayoutMode(LayoutQuadGrid)
-	}
-	m.Separator()
-
-	// 5. 关闭标签页操作 (Chrome 标准标签组)
+	// 4. 关闭标签页操作 (Chrome 标准标签组)
 	if index > 0 {
 		if m.Item("关闭标签页").Chosen() {
 			*tabToClose = index

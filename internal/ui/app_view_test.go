@@ -815,4 +815,48 @@ func TestAppView_DualSplitNaturalOrderWithTwoTabs(t *testing.T) {
 	}
 }
 
+func TestAppView_TiledTabRenderingNoOcclusion(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{},
+		},
+		theme: DockerMateTheme(),
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+			{Type: TabTypeSession, Title: "Host-1", Session: &TerminalSession{Host: &model.Host{ID: "h1", Name: "Host-1", Address: "1.1.1.1"}}},
+			{Type: TabTypeSession, Title: "Host-2", Session: &TerminalSession{Host: &model.Host{ID: "h2", Name: "Host-2", Address: "2.2.2.2"}}},
+		},
+		activeTabIndex:  1,
+		layoutMode:      LayoutDualSplit,
+		paneTabIndices:  [4]int{1, 2, -1, -1},
+		activePaneIndex: 0,
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 1000, 600)
+
+	// 运行两帧以使布局和滑块位置稳定
+	tt.Frame()
+	tt.Frame()
+
+	// 切换激活聚焦至 Tab 2 (平铺中的另一个 Tab)
+	v.switchActivePaneToTab(2)
+	tt.Frame()
+
+	// 验证：切换后 Tab 2 成为聚焦 Tab，Tab 1 成为平铺态未聚焦 Tab
+	if v.activeTabIndex != 2 {
+		t.Fatalf("Expected activeTabIndex to be 2, got %d", v.activeTabIndex)
+	}
+	lbl1, _ := v.getTabPanePositionLabel(1)
+	if lbl1 != "左" {
+		t.Errorf("Expected Tab 1 to have tiled position label '左', got %q", lbl1)
+	}
+	lbl2, _ := v.getTabPanePositionLabel(2)
+	if lbl2 != "右" {
+		t.Errorf("Expected Tab 2 to have tiled position label '右', got %q", lbl2)
+	}
+}
+
+
 
