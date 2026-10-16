@@ -355,9 +355,18 @@ func (s *TerminalSession) RefreshFiles() {
 						continue
 					}
 					isDir := e.IsDir()
+					fullPath := filepath.Join(dir, e.Name())
+
+					// 若条目为符号链接，检查其实际指向的目标是否为目录 (例如 macOS 下的 Google Drive)
+					if !isDir && (e.Type()&os.ModeSymlink != 0 || info.Mode()&os.ModeSymlink != 0) {
+						if statInfo, sErr := os.Stat(fullPath); sErr == nil {
+							isDir = statInfo.IsDir()
+						}
+					}
+
 					entries = append(entries, sftpService.FileEntry{
 						Name:      e.Name(),
-						Path:      filepath.Join(dir, e.Name()),
+						Path:      fullPath,
 						Size:      info.Size(),
 						SizeHuman: sftpService.FormatSize(info.Size(), isDir),
 						Mode:      info.Mode().String(),
@@ -748,10 +757,21 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 					}
 
 					row := ui.Row(c).Height(26).Background(rowBg).Border(1, borderCol).Padding(0, t.Space(1.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5))
+					if !isSel && row.Hovered() {
+						row.Background(ColSidebarHover)
+					}
+
+					isDir := item.IsDir
+					// 防御性校验：若标记为文件但本地真实目标为目录（如软链接），自动识别为目录
+					if !isDir && s.Host.AuthType == model.AuthTypeLocal {
+						if fi, err := os.Stat(item.Path); err == nil && fi.IsDir() {
+							isDir = true
+						}
+					}
 
 					// 右键操作菜单（涵盖删除、编辑、下载等）
 					row.ContextMenu(func(m *ui.Menu) {
-						if item.IsDir {
+						if isDir {
 							if m.Item("进入目录").Chosen() {
 								s.NavigateTo(item.Path)
 							}
@@ -789,7 +809,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 
 					// 双击进入目录或就地编辑文件
 					if row.DoubleClicked() {
-						if item.IsDir {
+						if isDir {
 							s.NavigateTo(item.Path)
 						} else {
 							if onOpenFile != nil {
@@ -804,7 +824,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 
 					row.Children(func() {
 						// 1. 文件左侧用 r、d 标识是文件还是目录（d 为目录采用黄色徽章，r 为常规文件采用静音灰色）
-						if item.IsDir {
+						if isDir {
 							ui.Row(c).Width(16).Height(16).Radius(2).Background(ui.Hex("#FEF3C7")).Center().Children(func() {
 								ui.Text(c, "d").FontSize(10.5).Bold().TextColor(ui.Hex("#D97706"))
 							})

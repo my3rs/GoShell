@@ -204,7 +204,13 @@ func matchFilesAndDirs(prefix string, currentDir string) []string {
 		if basePrefix == "" || strings.HasPrefix(strings.ToLower(name), lowerBasePrefix) {
 			// 如果原始输入包含空格，补全时自动做友好处理
 			item := dirPart + name
-			if e.IsDir() {
+			isDir := e.IsDir()
+			if !isDir && e.Type()&os.ModeSymlink != 0 {
+				if fi, err := os.Stat(filepath.Join(targetDir, name)); err == nil {
+					isDir = fi.IsDir()
+				}
+			}
+			if isDir {
 				item += "/"
 			} else {
 				item += " "
@@ -229,7 +235,13 @@ func listAllDirEntries(line []rune, currentDir string) AutocompleteResult {
 	var suggestions []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() {
+		isDir := e.IsDir()
+		if !isDir && e.Type()&os.ModeSymlink != 0 {
+			if fi, err := os.Stat(filepath.Join(currentDir, name)); err == nil {
+				isDir = fi.IsDir()
+			}
+		}
+		if isDir {
 			name += "/"
 		}
 		suggestions = append(suggestions, name)

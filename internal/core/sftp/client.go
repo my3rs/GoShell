@@ -97,6 +97,13 @@ func (c *Client) ListDirectory(remotePath string) ([]FileEntry, error) {
 		fullPath := path.Join(remotePath, name)
 		isDir := entry.IsDir()
 
+		// 若条目为符号链接，检查其实际指向的目标是否为目录
+		if !isDir && (entry.Mode()&os.ModeSymlink != 0) {
+			if targetInfo, err := c.sftpClient.Stat(fullPath); err == nil {
+				isDir = targetInfo.IsDir()
+			}
+		}
+
 		result = append(result, FileEntry{
 			Name:      name,
 			Path:      fullPath,

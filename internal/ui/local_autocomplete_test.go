@@ -114,3 +114,26 @@ func TestFormatSuggestions(t *testing.T) {
 		t.Errorf("expected non-empty formatted suggestions")
 	}
 }
+
+func TestAutocomplete_SymlinkDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetDir := filepath.Join(tmpDir, "CloudStorage_Target")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	symlinkDir := filepath.Join(tmpDir, "Google Drive")
+	if err := os.Symlink(targetDir, symlinkDir); err != nil {
+		t.Skipf("当前环境不支持创建符号链接，跳过测试: %v", err)
+	}
+
+	// 测试：补全软链接目录 "ls Google" 应自动追加 "/"，即 "ls Google Drive/"
+	res := Autocomplete([]rune("ls Google"), tmpDir)
+	if !res.HasMatch || !res.IsExactMatch {
+		t.Fatalf("expected exact match for 'ls Google', got match=%v exact=%v", res.HasMatch, res.IsExactMatch)
+	}
+	if string(res.NewLine) != "ls Google Drive/" {
+		t.Errorf("res.NewLine = %q, want %q", string(res.NewLine), "ls Google Drive/")
+	}
+}
+
