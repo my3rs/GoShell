@@ -13,7 +13,6 @@
   <img src="https://img.shields.io/badge/UI-MyGo-0366D6?style=flat-square" alt="MyGo UI" />
   <img src="https://img.shields.io/badge/Engine-Ghostty--VT-FF5722?style=flat-square" alt="Ghostty-VT" />
   <img src="https://img.shields.io/badge/Platform-macOS%20|%20Windows%20|%20Linux-lightgrey?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
 </p>
 
 <p align="center">
@@ -24,62 +23,45 @@
 
 ## 项目简介
 
-GoShell 是一个基于 Go 语言和桌面 GUI 框架 [MyGo](https://github.com/egoist/mygo) 开发的跨平台桌面终端与远程主机管理工具。该项目内嵌 Ghostty-VT 原生终端虚拟仿真引擎，不依赖 Electron 或 Web 渲染技术栈，具备内存占用低、启动迅速及跨平台行为一致的特点。
+GoShell 是一个跨平台桌面终端与远程主机管理工具。采用 Go 语言结合桌面框架 MyGo 开发，底层集成 Ghostty-VT 终端仿真引擎。程序启动迅速，资源占用低，专注于提供简洁高效的日常运维与本地开发体验。
 
 ---
 
 ## 主要特性
 
-- **终端仿真与文本渲染**：集成 Ghostty-VT 终端引擎，支持 24 位真彩色（True Color）、全套 VT 转义序列及平滑文本滚动。
-- **本地终端环境支持**：
-  - **Windows**：内置嵌入式 Busybox 环境，同时支持切换为 PowerShell 或 CMD。
-  - **macOS / Linux**：默认接入系统登录 Shell（如 Zsh、Bash）。
-- **SSH 会话与主机管理**：
-  - 提供主机列表展示与分组归类功能。
-  - 支持快捷解析 `ssh user@host:port` 格式的连接命令。
-  - 支持基于密码与私钥文件（含私钥密码）的身份认证。
-- **多窗格与多标签工作区**：
-  - 支持单标签视窗、左右双分屏（Dual Split）与四宫格（2×2 Quad Grid）等视窗布局，支持快捷切换焦点。
-  - 标签页支持重命名以及关闭确认拦截，避免误操作中断连接。
-- **SFTP 文件管理与远程编辑**：
-  - 侧边栏提供主机列表与远程文件目录树双视图。
-  - 支持文件与目录的上传、下载及后台传输任务进度管理。
-  - 内置轻量文本编辑器，支持直接打开远程文本文件并同步保存写回服务器。
-- **凭据加密与本地存储**：
-  - 基于本地 SQLite 进行元数据持久化。
-  - 敏感凭据（密码、私钥）统一采用 AES-256-GCM 算法加密存储，主密钥由本地受控管理，不包含明文凭证。
-- **跨平台分发支持**：
-  - 适配 macOS（Apple Silicon 与 Intel x86_64）、Windows（AMD64 与 ARM64）及 Linux 平台。
-  - 终端引擎动态库与运行时资源打包内嵌，支持单文件分发与离线环境使用。
+- **多标签与多分屏**：支持单标签、双分屏与四宫格视窗布局，可在同一窗口内并排操作多个会话。
+- **内置本地终端**：启动即用本地命令行，Windows 支持 BusyBox、CMD 与 PowerShell 切换，macOS 与 Linux 接入原生 Shell。
+- **SSH 主机管理**：支持服务器分组归类与凭据保存，支持直接输入标准 SSH 命令快速连接。
+- **文件管理与在线编辑**：集成 SFTP 远程文件浏览、上传下载以及远程文件就地编辑保存。
+- **安全本地存储**：服务器配置与登录凭据全部加密保存在本机，不上传云端。
+- **独立便携运行**：内嵌核心依赖，解压即用，无外部依赖。
 
 ---
 
 ## 系统架构
 
-GoShell 采用分层解耦的模块化设计：
-
 ```mermaid
 flowchart TD
-    subgraph UI ["表现层 (User Interface)"]
-        AppView["AppView 主视窗控制器"]
-        Workspace["工作区与布局管理 (Single / Dual / Quad)"]
-        TermSession["TerminalSession (Ghostty-VT 适配)"]
+    subgraph UI ["表现层"]
+        AppView["主窗口视图"]
+        Workspace["工作区与分屏管理"]
+        TermSession["终端会话"]
         EditorTab["文本编辑器"]
         AppView --> Workspace
         Workspace --> TermSession
         Workspace --> EditorTab
     end
 
-    subgraph App ["业务编排层 (Application)"]
-        AppMgr["App 上下文管理器"]
+    subgraph App ["业务层"]
+        AppMgr["应用上下文与状态管理"]
         AppView --> AppMgr
     end
 
-    subgraph Core ["核心能力层 (Core Services)"]
-        SSHClient["SSH 客户端服务 (crypto/ssh)"]
-        SFTPClient["SFTP 客户端与传输队列 (pkg/sftp)"]
-        Storage["SQLite 存储引擎 (modernc.org/sqlite)"]
-        Security["加密服务 (AES-256-GCM)"]
+    subgraph Core ["核心能力层"]
+        SSHClient["SSH 客户端"]
+        SFTPClient["SFTP 客户端与传输队列"]
+        Storage["本地存储"]
+        Security["数据加密服务"]
         
         AppMgr --> SSHClient
         AppMgr --> SFTPClient
@@ -87,9 +69,9 @@ flowchart TD
         Storage --> Security
     end
 
-    subgraph Natives ["运行时支持 (Natives)"]
-        Ghostty["Ghostty-VT 终端引擎 (libghostty-vt)"]
-        Busybox["Windows 嵌入式 BusyBox 环境"]
+    subgraph Natives ["运行时支持"]
+        Ghostty["Ghostty-VT 终端引擎"]
+        Busybox["内置命令行工具"]
         TermSession --> Ghostty
         TermSession --> Busybox
     end
@@ -101,12 +83,12 @@ flowchart TD
 
 ### 环境要求
 
-- **Go**：`1.24` 或更高版本
-- **CGO**：无需外部 CGO 依赖，纯 Go 编译并通过运行时动态装载底层 VT 引擎
+- Go 1.24 或更高版本
+- 具备标准构建工具 make
 
 ### 本地运行
 
-在项目根目录下执行以下命令直接启动运行：
+在项目根目录下执行以下命令即可启动开发版应用：
 
 ```bash
 make run
@@ -116,45 +98,44 @@ make run
 
 ## 构建与打包
 
-项目使用 `Makefile` 管理各平台的构建和交叉编译流程：
+项目使用 Makefile 管理各平台的构建流程：
 
 ```bash
-# 查看所有可用构建命令说明
 make help
 ```
 
-### 1. 本地主机编译
+### 本地编译
 ```bash
 make build
-# 产物输出至: bin/goshell
 ```
+编译产物输出至 `bin/goshell`。
 
-### 2. Windows 平台编译与打包
+### Windows 编译与打包
 ```bash
-# 编译 Windows 64位 GUI 程序（包含程序图标与清单文件）
+# 编译 64 位图形界面程序
 make build-windows
 
-# 编译 Windows ARM64 程序
+# 编译 ARM64 架构程序
 make build-windows-arm64
 
-# 打包为离线 Zip 压缩包（包含可执行程序与运行时动态库）
+# 打包为离线压缩包，内含主程序与配套运行库
 make package-windows
 ```
 
-### 3. macOS 平台编译
+### macOS 编译
 ```bash
 make build-darwin
-# 产物输出至: bin/GoShell-darwin 及配套 libghostty-vt.dylib
 ```
+编译产物输出至 `bin/GoShell-darwin` 及对应动态库。
 
-### 4. Linux 平台编译
+### Linux 编译
 ```bash
 make build-linux
-# 产物输出至: bin/GoShell-linux 及配套 libghostty-vt.so
 ```
+编译产物输出至 `bin/GoShell-linux` 及对应动态库。
 
-### 5. 更新原生引擎库
-如需重新下载各平台对应的 Ghostty 终端动态库，可执行：
+### 更新原生引擎库
+如需重新下载各操作系统适配的终端引擎动态库，可执行：
 ```bash
 make fetch-natives
 ```
@@ -166,32 +147,32 @@ make fetch-natives
 ```text
 goshell/
 ├── cmd/
-│   └── goshell/             # 桌面程序入口 (main.go, 窗口初始化与事件循环)
+│   └── goshell/             # 桌面程序入口，负责窗口生命周期与事件循环
 ├── internal/
-│   ├── app/                 # 应用程序上下文、状态维护与初始化数据
-│   ├── core/                # 核心功能模块
-│   │   ├── model/           # 数据模型定义
-│   │   ├── security/        # 主密钥管理与 AES-256-GCM 加解密服务
-│   │   ├── storage/         # SQLite 数据持久化实现
-│   │   ├── ssh/             # SSH 连接与 PTY 会话实现
-│   │   ├── sftp/            # SFTP 客户端与远程文件操作
-│   │   └── transfer/        # 后台文件传输任务调度
-│   └── ui/                  # 桌面 UI 实现 (基于 MyGo)
-│       ├── app_view.go      # 主界面布局、事件响应与窗口控制
-│       ├── session.go       # 终端会话与 Ghostty-VT 状态流转
+│   ├── app/                 # 应用程序主状态与数据初始化
+│   ├── core/                # 底层核心服务
+│   │   ├── model/           # 数据结构定义
+│   │   ├── security/        # 密钥管理与加解密逻辑
+│   │   ├── storage/         # 本地数据库持久化
+│   │   ├── ssh/             # SSH 连接与会话控制
+│   │   ├── sftp/            # SFTP 远程文件操作
+│   │   └── transfer/        # 后台文件传输调度
+│   └── ui/                  # 界面视图实现
+│       ├── app_view.go      # 主界面布局与事件调度
+│       ├── session.go       # 终端会话与渲染逻辑
 │       ├── editor_tab.go    # 远程文件文本编辑器
-│       ├── ssh_cmd_parser.go# SSH 命令行解析器
-│       └── theme.go         # 界面配色与布局常量
+│       ├── ssh_cmd_parser.go# SSH 命令行解析
+│       └── theme.go         # 界面主题与样式常量
 ├── assets/
-│   ├── brand/               # 品牌视觉资源 (图标、Logo 等)
-│   ├── fonts/               # 终端字体文件
-│   └── natives/             # 各操作系统对应的终端引擎动态库及 Busybox 程序
+│   ├── brand/               # 品牌视觉素材与图标
+│   ├── fonts/               # 终端字体资源
+│   └── natives/             # 各系统终端引擎动态库与命令行工具
 ├── tools/
-│   ├── brandgen/            # 品牌资源生成工具
-│   └── fetch_natives/       # 跨平台动态库同步脚本
-├── Makefile                 # 构建、测试与打包指令
+│   ├── brandgen/            # 图标资源生成脚本
+│   └── fetch_natives/       # 动态库同步脚本
+├── Makefile                 # 编译构建指令
 ├── mygo.json                # 桌面应用配置清单
-└── go.mod                   # 模块依赖描述文件
+└── go.mod                   # 模块依赖描述
 ```
 
 ---
@@ -200,13 +181,5 @@ goshell/
 
 GoShell 的全部配置与连接信息仅保存在用户本地设备中：
 
-- **数据存储路径**：`~/.goshell/`
-  - `goshell.db`：SQLite 数据库文件，用于持久化主机配置与连接历史。
-  - `master.key`：本地生成的 AES-256 主密钥文件。
-- **注意事项**：主机密码及私钥凭据均使用 `master.key` 加密。若该密钥文件损坏或丢失，将无法解密先前已保存的连接凭据，请注意妥善备份。
-
----
-
-## 许可证
-
-本项目基于 [MIT 许可证](LICENSE) 发布。终端仿真引擎遵循 Ghostty 的开源协议，字标字体授权详情请参考 `assets/brand/FONT-LICENSE.txt`。
+- 数据存储路径为 `~/.goshell/`，其中包含数据库文件 `goshell.db` 和密钥文件 `master.key`。
+- 服务器登录密码与私钥等凭据均通过本地密钥加密存储。若密钥文件丢失，将无法解密先前保存的凭据，请注意妥善保存该目录。
