@@ -14,11 +14,10 @@ func TestLocalConn_NormalizeCRLF(t *testing.T) {
 		{"empty", []byte{}, []byte{}},
 		{"ascii without newline", []byte("hello world"), []byte("hello world")},
 		{"already CRLF", []byte("hello\r\nworld\r\n"), []byte("hello\r\nworld\r\n")},
-		{"standalone CR", []byte("dir\r"), []byte("dir\r\n")},
-		{"standalone LF", []byte("dir\n"), []byte("dir\r\n")},
-		{"multiple standalone CR", []byte("a\rb\rc\r"), []byte("a\r\nb\r\nc\r\n")},
+		{"standalone LF (ls staircase prevention)", []byte("3D Objects\nContacts\nDesktop\n"), []byte("3D Objects\r\nContacts\r\nDesktop\r\n")},
 		{"multiple standalone LF", []byte("a\nb\nc\n"), []byte("a\r\nb\r\nc\r\n")},
-		{"mixed CR, LF and CRLF", []byte("a\r\nb\rc\nd\r\n"), []byte("a\r\nb\r\nc\r\nd\r\n")},
+		{"mixed CRLF and LF", []byte("a\r\nb\nc\r\nd\n"), []byte("a\r\nb\r\nc\r\nd\r\n")},
+		{"standalone CR preserved for progress bar", []byte("10%\r20%\r30%"), []byte("10%\r20%\r30%")},
 	}
 
 	for _, tt := range tests {
@@ -28,6 +27,28 @@ func TestLocalConn_NormalizeCRLF(t *testing.T) {
 				t.Errorf("normalizeCRLF(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCrlfNormalizer_StreamChunks(t *testing.T) {
+	var n crlfNormalizer
+
+	// 模拟流式读取：分块 1 以 \r 结尾
+	chunk1 := n.Normalize([]byte("downloading\r"))
+	if !bytes.Equal(chunk1, []byte("downloading\r")) {
+		t.Errorf("chunk1 = %q, want %q", chunk1, "downloading\r")
+	}
+
+	// 分块 2 以 \n 开头，验证不重复补 \r
+	chunk2 := n.Normalize([]byte("\ncompleted\n"))
+	if !bytes.Equal(chunk2, []byte("\ncompleted\r\n")) {
+		t.Errorf("chunk2 = %q, want %q", chunk2, "\ncompleted\r\n")
+	}
+
+	// 验证合并后的整体流为合法 CRLF
+	combined := append(chunk1, chunk2...)
+	if !bytes.Equal(combined, []byte("downloading\r\ncompleted\r\n")) {
+		t.Errorf("combined = %q, want %q", combined, "downloading\r\ncompleted\r\n")
 	}
 }
 

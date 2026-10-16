@@ -1143,7 +1143,7 @@ func (v *AppView) renderTabContent(c *ui.Context, t *ui.Theme, tabIndex int, onC
 
 // renderLayoutSwitcher 渲染多标签栏右侧的快速布局控制胶囊组
 func (v *AppView) renderLayoutSwitcher(c *ui.Context, t *ui.Theme) {
-	ui.Row(c).AlignItems(ui.Center).Gap(1).Padding(2).Background(ui.Hex("#E2E8F0")).Radius(5).Margin(0, 0, 4, 4).Children(func() {
+	ui.Row(c).Height(28).AlignItems(ui.Center).Gap(1).Padding(2).Background(ui.Hex("#E2E8F0")).Radius(5).Children(func() {
 		// 单视窗全屏
 		v.renderLayoutBtn(c, t, LayoutSingle, IconLayoutSingle, "单终端视窗 (Alt+1)")
 		// 左右双 Tab 并列

@@ -223,6 +223,7 @@ type pipeConn struct {
 	lineBuf     []rune
 	onIntercept func(line string) bool
 	closed      bool
+	normalizer  crlfNormalizer
 }
 
 // readProcessOutputLoop 在后台持续读取子进程输出，流式转码 GBK -> UTF-8 并写入管道供终端消费
@@ -263,7 +264,8 @@ func (c *pipeConn) readProcessOutputLoop() {
 			}
 
 			if len(outBytes) > 0 {
-				if _, werr := c.pw.Write(outBytes); werr != nil {
+				normalized := c.normalizer.Normalize(outBytes)
+				if _, werr := c.pw.Write(normalized); werr != nil {
 					break
 				}
 			}
@@ -272,7 +274,8 @@ func (c *pipeConn) readProcessOutputLoop() {
 		if err != nil {
 			if len(pending) > 0 && c.oemCP != 0 && c.oemCP != 65001 {
 				outBytes := cpToUTF8(c.oemCP, pending)
-				_, _ = c.pw.Write(outBytes)
+				normalized := c.normalizer.Normalize(outBytes)
+				_, _ = c.pw.Write(normalized)
 			}
 			_ = c.pw.CloseWithError(err)
 			break

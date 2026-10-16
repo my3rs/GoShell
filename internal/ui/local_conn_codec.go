@@ -2,38 +2,52 @@ package ui
 
 import "unicode/utf8"
 
-// normalizeCRLF 规范化行终止符：将孤立的 \r 或 \n 规范化为 Windows 标准的 \r\n，已有 \r\n 保持不变
-func normalizeCRLF(b []byte) []byte {
+// crlfNormalizer 规范化行终止符（等同于 POSIX 伪终端 PTY 的 ONLCR 模式）：
+// 将输出流中所有未跟在 \r 后面的裸 \n 规范化为 \r\n，已有的 \r\n 保持不变，同时保留单独 \r 作为行首覆盖。
+// 结构体保持前一数据块的末尾状态，彻底避免跨数据块切片时重复插入换行或斜向阶梯楼梯效应。
+type crlfNormalizer struct {
+	lastByte byte
+}
+
+func (n *crlfNormalizer) Normalize(src []byte) []byte {
+	if len(src) == 0 {
+		return src
+	}
 	needNorm := false
-	for i := 0; i < len(b); i++ {
-		if b[i] == '\r' {
-			if i+1 == len(b) || b[i+1] != '\n' {
-				needNorm = true
-				break
-			}
-			i++ // 跳过随后的 \n
-		} else if b[i] == '\n' {
+	prev := n.lastByte
+	for i := 0; i < len(src); i++ {
+		b := src[i]
+		if b == '\n' && prev != '\r' {
 			needNorm = true
 			break
 		}
+		prev = b
 	}
 	if !needNorm {
-		return b
+		n.lastByte = src[len(src)-1]
+		return src
 	}
-	res := make([]byte, 0, len(b)+4)
-	for i := 0; i < len(b); i++ {
-		if b[i] == '\r' {
-			res = append(res, '\r', '\n')
-			if i+1 < len(b) && b[i+1] == '\n' {
-				i++
+
+	dst := make([]byte, 0, len(src)+len(src)/8+8)
+	for i := 0; i < len(src); i++ {
+		b := src[i]
+		if b == '\n' {
+			if n.lastByte != '\r' {
+				dst = append(dst, '\r')
 			}
-		} else if b[i] == '\n' {
-			res = append(res, '\r', '\n')
+			dst = append(dst, '\n')
 		} else {
-			res = append(res, b[i])
+			dst = append(dst, b)
 		}
+		n.lastByte = b
 	}
-	return res
+	return dst
+}
+
+// normalizeCRLF 规范化行终止符（无状态单次调用）：将孤立未配对的 \n 规范化为 \r\n，已有 \r\n 保持不变
+func normalizeCRLF(b []byte) []byte {
+	var n crlfNormalizer
+	return n.Normalize(b)
 }
 
 // isUTF8 检查字节切片是否为合法的 UTF-8。若末尾仅包含不完整的前缀，incomplete 返回末尾未完成字节数
