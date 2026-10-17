@@ -37,7 +37,6 @@ type Host struct {
 	KeyContent  string    `json:"-"`           // 私钥内容（内存明文，落库时加密）
 	Passphrase  string    `json:"-"`           // 私钥口令（内存明文，落库时加密）
 	JumpHostID  string    `json:"jump_host_id"`// 跳板机 Host ID（链式跳板）
-	Description string    `json:"description"` // 备注信息
 	ColorTag    string    `json:"color_tag"`   // 标签颜色 (用于终端标签和侧边栏标识)
 	ShellType   string    `json:"shell_type,omitempty"` // 本地终端指定的 Shell 类型 (auto/busybox/powershell/cmd)
 	IsEphemeral bool      `json:"is_ephemeral,omitempty"` // 临时会话，不持久化保存到数据库

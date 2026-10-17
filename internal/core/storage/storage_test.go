@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -46,7 +47,6 @@ func TestStorage_GroupAndHostCRUD(t *testing.T) {
 		Username:    "admin",
 		AuthType:    model.AuthTypePassword,
 		Password:    "SuperSecretPassword123!",
-		Description: "主 API 节点",
 		ColorTag:    "#00FF00",
 	}
 
@@ -121,3 +121,79 @@ func TestStorage_GroupAndHostCRUD(t *testing.T) {
 func NewCipherServiceMock() (*security.CipherService, error) {
 	return security.NewCipherService("")
 }
+
+func TestStorage_MigrationCleansDescriptionColumn(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "legacy.db")
+	cipher, err := security.NewCipherService("")
+	if err != nil {
+		t.Fatalf("failed to create cipher: %v", err)
+	}
+
+	// 1. 模拟旧版数据库，建表时带有 description 列并插入历史数据
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open raw db: %v", err)
+	}
+	legacySchema := `
+	CREATE TABLE hosts (
+		id TEXT PRIMARY KEY,
+		group_id TEXT,
+		name TEXT NOT NULL,
+		address TEXT NOT NULL,
+		port INTEGER NOT NULL DEFAULT 22,
+		username TEXT NOT NULL DEFAULT 'root',
+		auth_type TEXT NOT NULL,
+		password_enc TEXT,
+		key_path TEXT,
+		key_content_enc TEXT,
+		passphrase_enc TEXT,
+		jump_host_id TEXT,
+		description TEXT,
+		color_tag TEXT,
+		shell_type TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	`
+	if _, err := db.Exec(legacySchema); err != nil {
+		t.Fatalf("failed to create legacy schema: %v", err)
+	}
+	// 插入带有历史文案的数据
+	_, err = db.Exec(`
+		INSERT INTO hosts (id, group_id, name, address, port, username, auth_type, password_enc, key_path, key_content_enc, passphrase_enc, jump_host_id, description, color_tag, created_at, updated_at)
+		VALUES ('h-legacy-1', '', '老服务器1', '10.0.0.1', 22, 'root', 'password', '', '', '', '', '', '用户保存的连接', '#000', datetime('now'), datetime('now')),
+		       ('h-legacy-2', '', '老服务器2', '10.0.0.2', 22, 'root', 'password', '', '', '', '', '', '自建主机连接', '#000', datetime('now'), datetime('now'))
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert legacy data: %v", err)
+	}
+	_ = db.Close()
+
+	// 2. 使用新版 Storage 打开该数据库（将自动触发 migrate 清理旧列）
+	store, err := Open(dbPath, cipher)
+	if err != nil {
+		t.Fatalf("failed to open legacy db with Open: %v", err)
+	}
+	defer store.Close()
+
+	// 3. 验证旧主机仍可正常列表并读出
+	hosts, err := store.ListHosts()
+	if err != nil {
+		t.Fatalf("failed to list hosts from migrated db: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hosts))
+	}
+
+	// 4. 验证保存新主机与更新旧主机正常工作
+	h1, err := store.GetHost("h-legacy-1")
+	if err != nil {
+		t.Fatalf("failed to get h-legacy-1: %v", err)
+	}
+	h1.Name = "老服务器1-已重命名"
+	if err := store.SaveHost(h1); err != nil {
+		t.Fatalf("failed to save migrated host: %v", err)
+	}
+}
+

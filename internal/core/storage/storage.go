@@ -84,7 +84,6 @@ func (s *Storage) migrate() error {
 		key_content_enc TEXT,
 		passphrase_enc TEXT,
 		jump_host_id TEXT,
-		description TEXT,
 		color_tag TEXT,
 		shell_type TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
@@ -112,6 +111,8 @@ func (s *Storage) migrate() error {
 	}
 	// 针对已有旧数据库平滑增加 shell_type 列
 	_, _ = s.db.Exec("ALTER TABLE hosts ADD COLUMN shell_type TEXT DEFAULT ''")
+	// 彻底清理并移除旧版本中的 description 列（兼容旧数据库物理清理）
+	_, _ = s.db.Exec("ALTER TABLE hosts DROP COLUMN description")
 	return nil
 }
 
@@ -191,8 +192,8 @@ func (s *Storage) SaveHost(h *model.Host) error {
 	INSERT INTO hosts (
 		id, group_id, name, address, port, username, auth_type,
 		password_enc, key_path, key_content_enc, passphrase_enc,
-		jump_host_id, description, color_tag, shell_type, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		jump_host_id, color_tag, shell_type, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		group_id=excluded.group_id,
 		name=excluded.name,
@@ -205,7 +206,6 @@ func (s *Storage) SaveHost(h *model.Host) error {
 		key_content_enc=excluded.key_content_enc,
 		passphrase_enc=excluded.passphrase_enc,
 		jump_host_id=excluded.jump_host_id,
-		description=excluded.description,
 		color_tag=excluded.color_tag,
 		shell_type=excluded.shell_type,
 		updated_at=excluded.updated_at
@@ -214,7 +214,7 @@ func (s *Storage) SaveHost(h *model.Host) error {
 	_, err = s.db.Exec(query,
 		h.ID, h.GroupID, h.Name, h.Address, h.Port, h.Username, string(h.AuthType),
 		pwdEnc, h.KeyPath, keyEnc, passEnc,
-		h.JumpHostID, h.Description, h.ColorTag, h.ShellType, h.CreatedAt, h.UpdatedAt,
+		h.JumpHostID, h.ColorTag, h.ShellType, h.CreatedAt, h.UpdatedAt,
 	)
 	return err
 }
@@ -223,7 +223,7 @@ func (s *Storage) GetHost(id string) (*model.Host, error) {
 	query := `
 	SELECT id, group_id, name, address, port, username, auth_type,
 		   password_enc, key_path, key_content_enc, passphrase_enc,
-		   jump_host_id, description, color_tag, COALESCE(shell_type, ''), created_at, updated_at
+		   jump_host_id, color_tag, COALESCE(shell_type, ''), created_at, updated_at
 	FROM hosts WHERE id = ?
 	`
 	row := s.db.QueryRow(query, id)
@@ -233,7 +233,7 @@ func (s *Storage) GetHost(id string) (*model.Host, error) {
 	err := row.Scan(
 		&h.ID, &h.GroupID, &h.Name, &h.Address, &h.Port, &h.Username, &authType,
 		&pwdEnc, &h.KeyPath, &keyEnc, &passEnc,
-		&h.JumpHostID, &h.Description, &h.ColorTag, &h.ShellType, &h.CreatedAt, &h.UpdatedAt,
+		&h.JumpHostID, &h.ColorTag, &h.ShellType, &h.CreatedAt, &h.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -251,7 +251,7 @@ func (s *Storage) ListHosts() ([]*model.Host, error) {
 	query := `
 	SELECT id, group_id, name, address, port, username, auth_type,
 		   password_enc, key_path, key_content_enc, passphrase_enc,
-		   jump_host_id, description, color_tag, COALESCE(shell_type, ''), created_at, updated_at
+		   jump_host_id, color_tag, COALESCE(shell_type, ''), created_at, updated_at
 	FROM hosts ORDER BY name ASC
 	`
 	rows, err := s.db.Query(query)
@@ -267,7 +267,7 @@ func (s *Storage) ListHosts() ([]*model.Host, error) {
 		err := rows.Scan(
 			&h.ID, &h.GroupID, &h.Name, &h.Address, &h.Port, &h.Username, &authType,
 			&pwdEnc, &h.KeyPath, &keyEnc, &passEnc,
-			&h.JumpHostID, &h.Description, &h.ColorTag, &h.ShellType, &h.CreatedAt, &h.UpdatedAt,
+			&h.JumpHostID, &h.ColorTag, &h.ShellType, &h.CreatedAt, &h.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
