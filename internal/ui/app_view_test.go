@@ -1087,7 +1087,7 @@ func TestAppView_SidebarNoPersistentActiveAndDashboardCards(t *testing.T) {
 	v := &AppView{
 		app: &app.App{
 			Hosts: []*model.Host{
-				{ID: "local", Name: "本地终端", AuthType: model.AuthTypeLocal, Description: "系统原生 Shell"},
+				{ID: "local", Name: "本地终端", AuthType: model.AuthTypeLocal},
 				{ID: "h1", Name: "测试节点-1", AuthType: model.AuthTypePassword, Address: "192.168.1.10", Port: 22, Username: "root"},
 			},
 		},
@@ -1104,7 +1104,13 @@ func TestAppView_SidebarNoPersistentActiveAndDashboardCards(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	// 1. 验证首页 Tab 0 控制台平铺展示了所有主机卡片中的关键信息
+	// 1. 验证首页 Tab 0 启动台展示了最近连接主机关键信息与快捷操作入口
+	if _, ok := tt.Find("GoShell 启动台"); !ok {
+		t.Errorf("Expected to find GoShell 启动台 header in launchpad")
+	}
+	if _, ok := tt.Find("快捷键秘籍"); ok {
+		t.Errorf("Expected 快捷键秘籍 to be removed from launchpad")
+	}
 	if _, ok := tt.Find("本地终端"); !ok {
 		t.Errorf("Expected to find 本地终端 in dashboard")
 	}
@@ -1118,6 +1124,24 @@ func TestAppView_SidebarNoPersistentActiveAndDashboardCards(t *testing.T) {
 	// 2. 验证左侧列表中点击主机项不会产生常驻选中的背景异常
 	tt.Click("测试节点-1")
 	tt.Frame()
-	// 确保应用正常刷新且无崩溃
+
+	// 3. 验证启动台最近连接项在纯白底色下悬停背景色精确为 t.SurfaceHover (RGB 239, 242, 245)，实现与边栏感知一致的细腻微加深
+	// 折叠侧边栏以精确定位右侧工作区启动台内的最近连接项
+	v.sidebarCollapsed = true
+	tt.Frame()
+	tt.Frame()
+	rectLaunchNode, okLaunchNode := tt.Find("测试节点-1")
+	if okLaunchNode {
+		tt.Move(rectLaunchNode.X+10, rectLaunchNode.Y+2)
+		tt.Frame()
+		img := tt.Image()
+		col := img.At(int(rectLaunchNode.X+10), int(rectLaunchNode.Y+2))
+		r, g, b, _ := col.RGBA()
+		if uint8(r>>8) != 239 || uint8(g>>8) != 242 || uint8(b>>8) != 245 {
+			t.Errorf("Expected launchpad recent item hovered RGB(239, 242, 245), got RGB(%d, %d, %d)", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+		}
+	} else {
+		t.Errorf("Expected to find 测试节点-1 in launchpad after collapsing sidebar")
+	}
 }
 

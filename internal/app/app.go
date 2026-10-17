@@ -128,7 +128,6 @@ func (a *App) seedDefaultData() {
 		Port:        0,
 		Username:    "local",
 		AuthType:    model.AuthTypeLocal,
-		Description: "本地 Shell 终端直接交互",
 		ColorTag:    "#059669",
 	})
 
@@ -155,7 +154,6 @@ func (a *App) ensureLocalHost() {
 		Port:        0,
 		Username:    "local",
 		AuthType:    model.AuthTypeLocal,
-		Description: "本地 Shell 终端直接交互",
 		ColorTag:    "#059669",
 	})
 	_ = a.ReloadData()
