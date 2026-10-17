@@ -1503,10 +1503,10 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// 新建/编辑主机弹窗 (复刻 docker-mate 的 Dialog 规范)
+// 新建/编辑主机弹窗 (规范统一的 Dialog 规范)
 func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &v.modalOpen, func() {
-		ui.Column(c).Width(480).Gap(t.Space(3.5)).Children(func() {
+		ui.Column(c).Width(440).Gap(t.Space(3)).Children(func() {
 			title := "添加主机"
 			titleIcon := IconPlus
 			if v.formID != "" {
@@ -1517,11 +1517,11 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 				ui.Icon(c, titleIcon).Width(18).Height(18).TextColor(t.Accent)
 				ui.Text(c, title).FontSize(16).Bold().TextColor(t.Text)
 			})
-			ui.Text(c, "配置 SSH 远程主机连接凭据，密码与秘钥将由 AES-256 本地加密").FontSize(11.5).TextColor(t.TextMuted)
+			ui.Text(c, "配置 SSH 远程主机连接凭据，密码与秘钥将由 AES-256 本地加密").FontSize(12).TextColor(t.TextMuted)
 
 			if v.formErrorMsg != "" {
 				ui.Row(c).Background(ui.Hex("#FEE2E2")).Border(1, ui.Hex("#FCA5A5")).Padding(t.Space(2), t.Space(3)).Radius(t.Radius).Children(func() {
-					ui.Text(c, v.formErrorMsg).FontSize(11.5).TextColor(t.Danger)
+					ui.Text(c, v.formErrorMsg).FontSize(12).TextColor(t.Danger)
 				})
 			}
 
@@ -1567,67 +1567,92 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 				})
 			})
 
-			// 别名
-			ui.Text(c, "主机别名").FontSize(11.5).Bold().TextColor(t.Text)
-			ui.TextInput(c, &v.formName)
-
-			if v.formAuthType != "local" {
-				// 地址与端口
-				ui.Row(c).Gap(t.Space(2)).Children(func() {
-					ui.Column(c).Grow(1).Children(func() {
-						ui.Text(c, "主机地址").FontSize(11.5).Bold().TextColor(t.Text)
-						ui.TextInput(c, &v.formAddress)
-					})
-					ui.Column(c).Width(100).Children(func() {
-						ui.Text(c, "端口").FontSize(11.5).Bold().TextColor(t.Text)
-						ui.TextInput(c, &v.formPort)
+			// 表单输入区
+			ui.Column(c).Gap(t.Space(2.5)).Children(func() {
+				// 别名
+				ui.Column(c).Gap(4).Children(func() {
+					ui.Text(c, "主机别名").FontSize(12).Bold().TextColor(t.Text)
+					ui.TextInput(c, &v.formName).Placeholder("例如：生产网关、开发服务器").OnSubmit(func() {
+						v.saveHostForm()
 					})
 				})
 
-				// 用户名
-				ui.Text(c, "用户名").FontSize(11.5).Bold().TextColor(t.Text)
-				ui.TextInput(c, &v.formUsername)
+				if v.formAuthType != "local" {
+					// 地址与端口分栏
+					ui.Row(c).Gap(t.Space(2)).Children(func() {
+						ui.Column(c).Grow(1).Gap(4).Children(func() {
+							ui.Text(c, "主机地址").FontSize(12).Bold().TextColor(t.Text)
+							ui.TextInput(c, &v.formAddress).Placeholder("IP 或域名，如 192.168.1.100").OnSubmit(func() {
+								v.saveHostForm()
+							})
+						})
+						ui.Column(c).Width(80).Gap(4).Children(func() {
+							ui.Text(c, "端口").FontSize(12).Bold().TextColor(t.Text)
+							ui.TextInput(c, &v.formPort).Placeholder("22").OnSubmit(func() {
+								v.saveHostForm()
+							})
+						})
+					})
 
-				if v.formAuthType == "password" {
-					ui.Text(c, "密码").FontSize(11.5).Bold().TextColor(t.Text)
-					ui.TextInput(c, &v.formPassword)
-				} else {
-					ui.Text(c, "私钥路径").FontSize(11.5).Bold().TextColor(t.Text)
-					ui.TextInput(c, &v.formKeyPath).Placeholder("~/.ssh/id_rsa")
-				}
-			} else {
-				// 本地 Shell 类型分段单选
-				ui.Text(c, "Shell 类型").FontSize(11.5).Bold().TextColor(t.Text)
-				ui.Row(c).Height(30).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
-					options := []struct {
-						id   string
-						name string
-					}{
-						{"auto", "自动探测"},
-						{"busybox", "BusyBox"},
-						{"powershell", "PowerShell"},
-						{"cmd", "CMD"},
-					}
-					for _, opt := range options {
-						bg := ui.Hex("#E2E8F0")
-						fg := ColSidebarText
-						if v.formShellType == opt.id || (v.formShellType == "" && opt.id == "auto") {
-							bg = t.Surface
-							fg = t.Text
-						}
-						targetID := opt.id
-						ui.Row(c).Grow(1).Height(26).Background(bg).Radius(t.Radius - 2).Center().Children(func() {
-							ui.Text(c, opt.name).FontSize(11).Bold().TextColor(fg)
-						}).OnClick(func() {
-							v.formShellType = targetID
+					// 用户名
+					ui.Column(c).Gap(4).Children(func() {
+						ui.Text(c, "用户名").FontSize(12).Bold().TextColor(t.Text)
+						ui.TextInput(c, &v.formUsername).Placeholder("例如 root").OnSubmit(func() {
+							v.saveHostForm()
+						})
+					})
+
+					if v.formAuthType == "password" {
+						ui.Column(c).Gap(4).Children(func() {
+							ui.Text(c, "密码").FontSize(12).Bold().TextColor(t.Text)
+							ui.TextInput(c, &v.formPassword).Password().Placeholder("请输入连接密码").OnSubmit(func() {
+								v.saveHostForm()
+							})
+						})
+					} else {
+						ui.Column(c).Gap(4).Children(func() {
+							ui.Text(c, "私钥路径").FontSize(12).Bold().TextColor(t.Text)
+							ui.TextInput(c, &v.formKeyPath).Placeholder("~/.ssh/id_rsa").OnSubmit(func() {
+								v.saveHostForm()
+							})
 						})
 					}
-				})
-				ui.Text(c, "提示: 自动模式优先使用内置 BusyBox 虚拟 Bash，若未检测到则降级原生控制台").FontSize(11).TextColor(t.TextMuted)
-			}
+				} else {
+					// 本地 Shell 类型分段单选
+					ui.Column(c).Gap(4).Children(func() {
+						ui.Text(c, "Shell 类型").FontSize(12).Bold().TextColor(t.Text)
+						ui.Row(c).Height(30).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
+							options := []struct {
+								id   string
+								name string
+							}{
+								{"auto", "自动探测"},
+								{"busybox", "BusyBox"},
+								{"powershell", "PowerShell"},
+								{"cmd", "CMD"},
+							}
+							for _, opt := range options {
+								bg := ui.Hex("#E2E8F0")
+								fg := ColSidebarText
+								if v.formShellType == opt.id || (v.formShellType == "" && opt.id == "auto") {
+									bg = t.Surface
+									fg = t.Text
+								}
+								targetID := opt.id
+								ui.Row(c).Grow(1).Height(26).Background(bg).Radius(t.Radius - 2).Center().Children(func() {
+									ui.Text(c, opt.name).FontSize(11).Bold().TextColor(fg)
+								}).OnClick(func() {
+									v.formShellType = targetID
+								})
+							}
+						})
+					})
+					ui.Text(c, "提示: 自动模式优先使用内置 BusyBox 虚拟 Bash，若未检测到则降级原生控制台").FontSize(11).TextColor(t.TextMuted)
+				}
+			})
 
 			// 底部操作按钮
-			ui.Row(c).Gap(t.Space(2)).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 				ui.Spacer(c)
 				if ui.Button(c, "取消").Clicked() {
 					v.modalOpen = false
@@ -1690,16 +1715,19 @@ func (v *AppView) saveRenameTab() {
 // renderRenameModal 标签页重命名弹窗
 func (v *AppView) renderRenameModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &v.renameModalOpen, func() {
-		ui.Column(c).Width(420).Gap(t.Space(3.5)).Children(func() {
+		ui.Column(c).Width(380).Gap(t.Space(3)).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 				ui.Icon(c, IconBrand).Width(18).Height(18).TextColor(t.Accent)
-				ui.Text(c, "重命名标签页").FontSize(15).Bold().TextColor(t.Text)
+				ui.Text(c, "重命名标签页").FontSize(16).Bold().TextColor(t.Text)
 			})
 
-			ui.Text(c, "输入自定义标签名称；留空或点击「恢复默认」可还原原始名称").FontSize(11.5).TextColor(t.TextMuted)
+			ui.Text(c, "输入自定义标签名称；留空或点击「恢复默认」可还原原始名称").FontSize(12).TextColor(t.TextMuted)
 
-			ui.TextInput(c, &v.renameInput).Placeholder("输入标签名称...").OnSubmit(func() {
-				v.saveRenameTab()
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Text(c, "标签名称").FontSize(12).Bold().TextColor(t.Text)
+				ui.TextInput(c, &v.renameInput).Placeholder("输入标签名称...").OnSubmit(func() {
+					v.saveRenameTab()
+				})
 			})
 
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
@@ -1882,21 +1910,29 @@ func (v *AppView) submitQuickConnect() {
 // renderQuickConnectModal 渲染快速连接弹窗 (简明无冗余文案)
 func (v *AppView) renderQuickConnectModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &v.quickConnectModalOpen, func() {
-		ui.Column(c).Width(400).Gap(t.Space(3)).Children(func() {
+		ui.Column(c).Width(440).Gap(t.Space(3)).Children(func() {
 			// 1. 标题区
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 				ui.Icon(c, IconServer).Width(18).Height(18).TextColor(t.Accent)
-				ui.Text(c, "快速连接").FontSize(15).Bold().TextColor(t.Text)
+				ui.Text(c, "快速连接").FontSize(16).Bold().TextColor(t.Text)
 			})
 
 			ui.Text(c, "临时建立 SSH 连接，断开后自动销毁，不保存至主机列表。").FontSize(12).TextColor(t.TextMuted)
+
+			if v.quickConnectErrorMsg != "" {
+				ui.Row(c).Background(ui.Hex("#FEE2E2")).Border(1, ui.Hex("#FCA5A5")).Padding(t.Space(2), t.Space(3)).Radius(t.Radius).Children(func() {
+					ui.Text(c, v.quickConnectErrorMsg).FontSize(12).TextColor(t.Danger)
+				})
+			}
 
 			// 2. 表单输入区
 			ui.Column(c).Gap(t.Space(2.5)).Children(func() {
 				// 快速目标输入框
 				ui.Column(c).Gap(4).Children(func() {
-					ui.Text(c, "连接目标").FontSize(12).TextColor(t.Text)
-					inp := ui.TextInput(c, &v.quickConnectTarget).Placeholder("如 root@192.168.1.100 或直接粘贴 ssh 命令")
+					ui.Text(c, "连接目标").FontSize(12).Bold().TextColor(t.Text)
+					inp := ui.TextInput(c, &v.quickConnectTarget).Placeholder("如 root@192.168.1.100 或直接粘贴 ssh 命令").OnSubmit(func() {
+						v.submitQuickConnect()
+					})
 					if inp.Changed() {
 						v.syncQuickConnectFieldsFromTarget()
 					}
@@ -1905,30 +1941,34 @@ func (v *AppView) renderQuickConnectModal(c *ui.Context, t *ui.Theme) {
 				// 主机地址与端口分栏
 				ui.Row(c).Gap(t.Space(2)).Children(func() {
 					ui.Column(c).Grow(1).Gap(4).Children(func() {
-						ui.Text(c, "主机地址").FontSize(12).TextColor(t.Text)
-						ui.TextInput(c, &v.quickConnectHost).Placeholder("IP 或域名")
+						ui.Text(c, "主机地址").FontSize(12).Bold().TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectHost).Placeholder("IP 或域名").OnSubmit(func() {
+							v.submitQuickConnect()
+						})
 					})
 					ui.Column(c).Width(80).Gap(4).Children(func() {
-						ui.Text(c, "端口").FontSize(12).TextColor(t.Text)
-						ui.TextInput(c, &v.quickConnectPort).Placeholder("22")
+						ui.Text(c, "端口").FontSize(12).Bold().TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectPort).Placeholder("22").OnSubmit(func() {
+							v.submitQuickConnect()
+						})
 					})
 				})
 
 				// 用户名与密码分栏
 				ui.Row(c).Gap(t.Space(2)).Children(func() {
 					ui.Column(c).Grow(1).Gap(4).Children(func() {
-						ui.Text(c, "用户名").FontSize(12).TextColor(t.Text)
-						ui.TextInput(c, &v.quickConnectUser).Placeholder("root")
+						ui.Text(c, "用户名").FontSize(12).Bold().TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectUser).Placeholder("root").OnSubmit(func() {
+							v.submitQuickConnect()
+						})
 					})
 					ui.Column(c).Grow(1).Gap(4).Children(func() {
-						ui.Text(c, "密码").FontSize(12).TextColor(t.Text)
-						ui.TextInput(c, &v.quickConnectPassword).Password().Placeholder("可选")
+						ui.Text(c, "密码").FontSize(12).Bold().TextColor(t.Text)
+						ui.TextInput(c, &v.quickConnectPassword).Password().Placeholder("可选").OnSubmit(func() {
+							v.submitQuickConnect()
+						})
 					})
 				})
-
-				if v.quickConnectErrorMsg != "" {
-					ui.Text(c, v.quickConnectErrorMsg).FontSize(12).TextColor(ui.Hex("#EF4444"))
-				}
 			})
 
 			// 3. 底部操作按钮
