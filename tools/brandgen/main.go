@@ -90,14 +90,6 @@ var promptCursor = path{
 
 var prompt path
 
-var tile = path{
-	{'M', []float32{16, 0}}, {'L', []float32{48, 0}},
-	{'C', []float32{58, 0, 64, 6, 64, 16}}, {'L', []float32{64, 48}},
-	{'C', []float32{64, 58, 58, 64, 48, 64}}, {'L', []float32{16, 64}},
-	{'C', []float32{6, 64, 0, 58, 0, 48}}, {'L', []float32{0, 16}},
-	{'C', []float32{0, 6, 6, 0, 16, 0}}, {'Z', nil},
-}
-
 func transformPath(p path, scale, dx, dy float32) path {
 	var result path
 	for _, c := range p {
@@ -155,6 +147,52 @@ func paint(dst *image.RGBA, p path, fill color.Color, scale, dx, dy float32) {
 	r.Draw(dst, dst.Bounds(), image.NewUniform(fill), image.Point{})
 }
 
+// rasterizePath 以 4 倍超采样把路径光栅化为覆盖率蒙版（0..1），供带光照的图标渲染使用。
+func rasterizePath(p path, size int, scale, dx, dy float64) []float64 {
+	const supersample = 4
+	r := vector.NewRasterizer(size*supersample, size*supersample)
+	for _, c := range p {
+		v := make([]float64, len(c.p))
+		for i := range c.p {
+			v[i] = float64(c.p[i]) * scale * supersample
+			if i%2 == 0 {
+				v[i] += dx * supersample
+			} else {
+				v[i] += dy * supersample
+			}
+		}
+		switch c.op {
+		case 'M':
+			r.MoveTo(float32(v[0]), float32(v[1]))
+		case 'L':
+			r.LineTo(float32(v[0]), float32(v[1]))
+		case 'Q':
+			r.QuadTo(float32(v[0]), float32(v[1]), float32(v[2]), float32(v[3]))
+		case 'C':
+			r.CubeTo(float32(v[0]), float32(v[1]), float32(v[2]), float32(v[3]), float32(v[4]), float32(v[5]))
+		case 'Z':
+			r.ClosePath()
+		}
+	}
+	super := image.NewAlpha(image.Rect(0, 0, size*supersample, size*supersample))
+	r.Draw(super, super.Bounds(), image.NewUniform(color.Alpha{255}), image.Point{})
+
+	coverage := make([]float64, size*size)
+	total := float64(supersample * supersample)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			var sum float64
+			for py := 0; py < supersample; py++ {
+				for px := 0; px < supersample; px++ {
+					sum += float64(super.AlphaAt(x*supersample+px, y*supersample+py).A)
+				}
+			}
+			coverage[y*size+x] = sum / total / 255
+		}
+	}
+	return coverage
+}
+
 var (
 	inkHex        = "#0366D6"
 	accentHex     = "#0366D6"
@@ -175,15 +213,6 @@ func init() {
 	prompt = append(transformPath(promptChevron, .8, 2, 7), promptCursor...)
 }
 
-func appIcon(size int) *image.RGBA {
-	im := image.NewRGBA(image.Rect(0, 0, size, size))
-	s := float32(size) / 64
-	// Transparent margin keeps the icon aligned with native desktop icons.
-	paint(im, tile, ink, s*.875, s*4, s*4)
-	paint(im, shell, pearl, s*.875, s*4, s*4)
-	paint(im, prompt, darkAccent, s*.875, s*4, s*4)
-	return im
-}
 func pngBytes(im image.Image) []byte {
 	var b bytes.Buffer
 	must(png.Encode(&b, im))
@@ -237,10 +266,14 @@ func wordmark() path {
 
 func desktopIcons() {
 	var body bytes.Buffer
+	// macOS 会从 icns 里挑最接近的尺寸，补齐 16/32/48 等小图可避免 Dock、访达缩略图被放大而发虚
 	for _, e := range []struct {
 		tag  string
 		size int
-	}{{"ic11", 32}, {"ic12", 64}, {"ic07", 128}, {"ic08", 256}, {"ic09", 512}, {"ic10", 1024}} {
+	}{
+		{"icp4", 16}, {"icp5", 32}, {"ic11", 32}, {"icp6", 64}, {"ic12", 64},
+		{"ic07", 128}, {"ic08", 256}, {"ic09", 512}, {"ic10", 1024},
+	} {
 		data := pngBytes(appIcon(e.size))
 		body.WriteString(e.tag)
 		must(binary.Write(&body, binary.BigEndian, uint32(len(data)+8)))
@@ -279,7 +312,7 @@ func main() {
 	write("logo.svg", svg(64, 64, mark(inkHex, accentHex)))
 	write("logo-dark.svg", svg(64, 64, mark(pearlHex, darkAccentHex)))
 	write("logo-mono.svg", svg(64, 64, mark("currentColor", "currentColor")))
-	write("app-icon.svg", svg(64, 64, `<g transform="translate(4 4) scale(.875)">`+shape(tile, inkHex)+mark(pearlHex, darkAccentHex)+`</g>`))
+	write("app-icon.svg", svg(64, 64, iconSVG()))
 	words := wordmark()
 	write("wordmark.svg", svg(220, 64, mark(inkHex, accentHex)+shape(words, wordHex)))
 	write("wordmark-dark.svg", svg(220, 64, mark(pearlHex, darkAccentHex)+shape(words, pearlHex)))
