@@ -252,7 +252,7 @@ func buildAuthMethods(host *model.Host) ([]ssh.AuthMethod, error) {
 		if host.Password != "" {
 			methods = append(methods, ssh.Password(host.Password))
 		}
-	case model.AuthTypeKeyFile:
+	case model.AuthTypeKeyFile, "key":
 		keyPath := host.KeyPath
 		if strings.HasPrefix(keyPath, "~/") {
 			if home, err := os.UserHomeDir(); err == nil {
