@@ -86,6 +86,7 @@ func (s *Storage) migrate() error {
 		jump_host_id TEXT,
 		color_tag TEXT,
 		shell_type TEXT DEFAULT '',
+		sort_order INTEGER DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -109,8 +110,9 @@ func (s *Storage) migrate() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
-	// 针对已有旧数据库平滑增加 shell_type 列
+	// 针对已有旧数据库平滑增加 shell_type 列与 sort_order 列
 	_, _ = s.db.Exec("ALTER TABLE hosts ADD COLUMN shell_type TEXT DEFAULT ''")
+	_, _ = s.db.Exec("ALTER TABLE hosts ADD COLUMN sort_order INTEGER DEFAULT 0")
 	// 彻底清理并移除旧版本中的 description 列（兼容旧数据库物理清理）
 	_, _ = s.db.Exec("ALTER TABLE hosts DROP COLUMN description")
 	return nil
@@ -192,8 +194,8 @@ func (s *Storage) SaveHost(h *model.Host) error {
 	INSERT INTO hosts (
 		id, group_id, name, address, port, username, auth_type,
 		password_enc, key_path, key_content_enc, passphrase_enc,
-		jump_host_id, color_tag, shell_type, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		jump_host_id, color_tag, shell_type, sort_order, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		group_id=excluded.group_id,
 		name=excluded.name,
@@ -208,13 +210,14 @@ func (s *Storage) SaveHost(h *model.Host) error {
 		jump_host_id=excluded.jump_host_id,
 		color_tag=excluded.color_tag,
 		shell_type=excluded.shell_type,
+		sort_order=excluded.sort_order,
 		updated_at=excluded.updated_at
 	`
 
 	_, err = s.db.Exec(query,
 		h.ID, h.GroupID, h.Name, h.Address, h.Port, h.Username, string(h.AuthType),
 		pwdEnc, h.KeyPath, keyEnc, passEnc,
-		h.JumpHostID, h.ColorTag, h.ShellType, h.CreatedAt, h.UpdatedAt,
+		h.JumpHostID, h.ColorTag, h.ShellType, h.SortOrder, h.CreatedAt, h.UpdatedAt,
 	)
 	return err
 }
@@ -223,7 +226,7 @@ func (s *Storage) GetHost(id string) (*model.Host, error) {
 	query := `
 	SELECT id, group_id, name, address, port, username, auth_type,
 		   password_enc, key_path, key_content_enc, passphrase_enc,
-		   jump_host_id, color_tag, COALESCE(shell_type, ''), created_at, updated_at
+		   jump_host_id, color_tag, COALESCE(shell_type, ''), COALESCE(sort_order, 0), created_at, updated_at
 	FROM hosts WHERE id = ?
 	`
 	row := s.db.QueryRow(query, id)
@@ -233,7 +236,7 @@ func (s *Storage) GetHost(id string) (*model.Host, error) {
 	err := row.Scan(
 		&h.ID, &h.GroupID, &h.Name, &h.Address, &h.Port, &h.Username, &authType,
 		&pwdEnc, &h.KeyPath, &keyEnc, &passEnc,
-		&h.JumpHostID, &h.ColorTag, &h.ShellType, &h.CreatedAt, &h.UpdatedAt,
+		&h.JumpHostID, &h.ColorTag, &h.ShellType, &h.SortOrder, &h.CreatedAt, &h.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -251,8 +254,8 @@ func (s *Storage) ListHosts() ([]*model.Host, error) {
 	query := `
 	SELECT id, group_id, name, address, port, username, auth_type,
 		   password_enc, key_path, key_content_enc, passphrase_enc,
-		   jump_host_id, color_tag, COALESCE(shell_type, ''), created_at, updated_at
-	FROM hosts ORDER BY name ASC
+		   jump_host_id, color_tag, COALESCE(shell_type, ''), COALESCE(sort_order, 0), created_at, updated_at
+	FROM hosts ORDER BY sort_order ASC, created_at ASC
 	`
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -267,7 +270,7 @@ func (s *Storage) ListHosts() ([]*model.Host, error) {
 		err := rows.Scan(
 			&h.ID, &h.GroupID, &h.Name, &h.Address, &h.Port, &h.Username, &authType,
 			&pwdEnc, &h.KeyPath, &keyEnc, &passEnc,
-			&h.JumpHostID, &h.ColorTag, &h.ShellType, &h.CreatedAt, &h.UpdatedAt,
+			&h.JumpHostID, &h.ColorTag, &h.ShellType, &h.SortOrder, &h.CreatedAt, &h.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -279,6 +282,29 @@ func (s *Storage) ListHosts() ([]*model.Host, error) {
 		hosts = append(hosts, h)
 	}
 	return hosts, nil
+}
+
+// UpdateHostsOrder 批量事务更新主机的排序权重
+func (s *Storage) UpdateHostsOrder(orderedIDs []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`UPDATE hosts SET sort_order = ? WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare update statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for idx, id := range orderedIDs {
+		if _, err := stmt.Exec(idx, id); err != nil {
+			return fmt.Errorf("failed to update host %s sort order: %w", id, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *Storage) DeleteHost(id string) error {

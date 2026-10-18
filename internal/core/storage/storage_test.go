@@ -197,3 +197,46 @@ func TestStorage_MigrationCleansDescriptionColumn(t *testing.T) {
 	}
 }
 
+func TestStorage_HostsOrder(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "order_test.db")
+	cipher, _ := NewCipherServiceMock()
+
+	store, err := Open(dbPath, cipher)
+	if err != nil {
+		t.Fatalf("failed to open storage: %v", err)
+	}
+	defer store.Close()
+
+	h1 := &model.Host{ID: "host-1", Name: "Host A", Address: "1.1.1.1", AuthType: model.AuthTypePassword, SortOrder: 0}
+	h2 := &model.Host{ID: "host-2", Name: "Host B", Address: "1.1.1.2", AuthType: model.AuthTypePassword, SortOrder: 1}
+	h3 := &model.Host{ID: "host-3", Name: "Host C", Address: "1.1.1.3", AuthType: model.AuthTypePassword, SortOrder: 2}
+
+	_ = store.SaveHost(h1)
+	_ = store.SaveHost(h2)
+	_ = store.SaveHost(h3)
+
+	// 初始排序应为 A, B, C
+	list, err := store.ListHosts()
+	if err != nil || len(list) != 3 {
+		t.Fatalf("unexpected list: %v, len=%d", err, len(list))
+	}
+	if list[0].ID != "host-1" || list[1].ID != "host-2" || list[2].ID != "host-3" {
+		t.Fatalf("initial order incorrect: %s, %s, %s", list[0].ID, list[1].ID, list[2].ID)
+	}
+
+	// 重新排序：把 C 放到最前，B 居中，A 放在最后：host-3, host-2, host-1
+	err = store.UpdateHostsOrder([]string{"host-3", "host-2", "host-1"})
+	if err != nil {
+		t.Fatalf("UpdateHostsOrder failed: %v", err)
+	}
+
+	listReordered, err := store.ListHosts()
+	if err != nil || len(listReordered) != 3 {
+		t.Fatalf("failed to list reordered hosts: %v", err)
+	}
+	if listReordered[0].ID != "host-3" || listReordered[1].ID != "host-2" || listReordered[2].ID != "host-1" {
+		t.Fatalf("reordered list mismatch: got [%s, %s, %s]", listReordered[0].ID, listReordered[1].ID, listReordered[2].ID)
+	}
+}
+
