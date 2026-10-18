@@ -31,6 +31,8 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Download native runtime libraries
+        run: go run tools/fetch_natives/main.go
       - name: Run tests
         run: go test ./...
 
@@ -46,6 +48,9 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Download native runtime libraries
+        shell: bash
+        run: go run tools/fetch_natives/main.go
       - name: Build Windows executable
         shell: bash
         run: |
@@ -96,6 +101,8 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Download native runtime libraries
+        run: go run tools/fetch_natives/main.go
       - name: Build macOS app
         shell: bash
         run: |
@@ -138,6 +145,8 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Download native runtime libraries
+        run: go run tools/fetch_natives/main.go
       - name: Build Linux files
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
