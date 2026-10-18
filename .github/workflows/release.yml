@@ -187,10 +187,13 @@ jobs:
           else
             VERSION="${{ inputs.version }}"
           fi
+          # nfpm package 不接受 --version 参数，版本需写入配置文件
+          { printf 'version: "%s"\n' "$VERSION"; cat packaging/linux/nfpm.yaml; } > /tmp/nfpm-release.yaml
+          cat /tmp/nfpm-release.yaml | head -3
           nfpm package --packager deb --target "dist/${APP_NAME}-v${VERSION}-linux-amd64.deb" \
-            --config packaging/linux/nfpm.yaml --version "$VERSION"
+            --config /tmp/nfpm-release.yaml
           nfpm package --packager rpm --target "dist/${APP_NAME}-v${VERSION}-linux-amd64.rpm" \
-            --config packaging/linux/nfpm.yaml --version "$VERSION"
+            --config /tmp/nfpm-release.yaml
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
