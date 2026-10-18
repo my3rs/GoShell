@@ -158,3 +158,15 @@ func (a *App) ensureLocalHost() {
 	})
 	_ = a.ReloadData()
 }
+
+// ReorderHosts 更新主机列表排序并持久化到数据库
+func (a *App) ReorderHosts(orderedIDs []string) error {
+	if a.Store == nil {
+		return nil
+	}
+	if err := a.Store.UpdateHostsOrder(orderedIDs); err != nil {
+		return err
+	}
+	return a.ReloadData()
+}
+
