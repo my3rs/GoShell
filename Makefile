@@ -6,8 +6,7 @@ MAIN_SRC    := ./cmd/goshell
 OUT_DIR     := bin
 ICON_ICO    := assets/brand/app-icon.ico
 NATIVES_DIR := assets/natives
-GOPATH      ?= $(shell go env GOPATH)
-WINRES      := $(GOPATH)/bin/go-winres
+WINRES      ?= go run github.com/tc-hib/go-winres@v0.3.3
 
 .PHONY: all help build run test clean build-windows build-windows-arm64 package-windows build-darwin build-linux ensure-winres fetch-natives
 
@@ -49,9 +48,9 @@ run:
 test:
 	go test -v ./...
 
-## ensure-winres: 检查并安装 go-winres 工具
+## ensure-winres: 确保 go-winres 可用
 ensure-winres:
-	@which $(WINRES) > /dev/null 2>&1 || (echo "==> 正在安装 go-winres 工具..." && go install github.com/tc-hib/go-winres@latest)
+	@echo "==> 使用 go-winres v0.3.3..."
 
 ## build-windows: 跨平台编译 Windows 64位程序（含图标与 GUI 清单，附带 Ghostty 离线引擎）
 build-windows: ensure-winres

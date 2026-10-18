@@ -33,6 +33,8 @@ jobs:
           cache: true
       - name: Download native runtime libraries
         run: go run tools/fetch_natives/main.go
+      - name: Verify Linux native runtime library
+        run: test -s assets/natives/linux-amd64/libghostty-vt.so
       - name: Run tests
         run: go test ./...
 
@@ -51,6 +53,9 @@ jobs:
       - name: Download native runtime libraries
         shell: bash
         run: go run tools/fetch_natives/main.go
+      - name: Verify Windows native runtime libraries
+        shell: bash
+        run: test -s assets/natives/windows-amd64/ghostty-vt.dll && test -s assets/natives/windows-amd64/busybox.exe
       - name: Build Windows executable
         shell: bash
         run: |
@@ -103,6 +108,8 @@ jobs:
           cache: true
       - name: Download native runtime libraries
         run: go run tools/fetch_natives/main.go
+      - name: Verify macOS native runtime library
+        run: test -s assets/natives/darwin-arm64/libghostty-vt.dylib
       - name: Build macOS app
         shell: bash
         run: |
@@ -147,6 +154,8 @@ jobs:
           cache: true
       - name: Download native runtime libraries
         run: go run tools/fetch_natives/main.go
+      - name: Verify Linux native runtime library
+        run: test -s assets/natives/linux-amd64/libghostty-vt.so
       - name: Build Linux files
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
