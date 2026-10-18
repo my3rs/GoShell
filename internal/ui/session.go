@@ -584,7 +584,28 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 				if taskCount > 0 {
 					queueText = fmt.Sprintf("传输中 (%d) %s", taskCount, taskSpeed)
 				}
-				if ui.Button(c, queueText).Clicked() {
+				// 深色工具栏按钮：展开和悬停时用柔和底色提示状态
+				queueBtn := ui.ButtonBase(c).Height(24).Shrink(0).Padding(0, 8).Radius(4).
+					Background(ui.Transparent).AlignItems(ui.Center).Gap(5).Label("传输队列")
+				queueColor := ui.Hex("#A1A1AA")
+				if s.ShowTransfer {
+					queueBtn.Background(ui.Hex("#27272A")).Tooltip("收起传输队列")
+					queueColor = ui.Hex("#D4D4D8")
+				} else {
+					queueBtn.Tooltip("展开传输队列")
+				}
+				if queueBtn.Hovered() {
+					queueBtn.Background(ui.Hex("#323238"))
+					queueColor = ui.Hex("#F4F4F5")
+				}
+				if taskCount > 0 {
+					queueColor = ui.Hex("#93B4D8")
+				}
+				queueBtn.Children(func() {
+					ui.Icon(c, IconTransfer).Width(13).Height(13).TextColor(queueColor)
+					ui.Text(c, queueText).FontSize(11).TextColor(queueColor).SingleLine()
+				})
+				if queueBtn.Clicked() {
 					s.ShowTransfer = !s.ShowTransfer
 				}
 			}
@@ -834,19 +855,19 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 							})
 						}
 
-						// 2. 文件/目录名称 (隐藏文件文字采用次级柔和色)
+						// 2. 文件/目录名称保持单行，超宽省略，悬停显示完整名称
 						nameCol := t.Text
 						if isHidden {
 							nameCol = t.TextMuted
 						}
-						nameElem := ui.Text(c, item.Name).FontSize(11).TextColor(nameCol).Grow(1)
+						nameElem := ui.Text(c, item.Name).FontSize(11).TextColor(nameCol).Grow(1).Shrink(1).MinWidth(0).SingleLine().Tooltip(item.Name)
 						if item.IsDir {
 							nameElem.Bold()
 						}
 
 						// 3. 文件大小 (右侧只显示大小，无进入/删除等按钮)
 						if !item.IsDir {
-							ui.Text(c, item.SizeHuman).FontSize(10).TextColor(t.TextMuted)
+							ui.Text(c, item.SizeHuman).FontSize(10).TextColor(t.TextMuted).Shrink(0).NoWrap()
 						}
 					})
 				}
@@ -855,64 +876,93 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 	})
 }
 
-// 渲染传输队列抽屉 (底部浮动展示，复刻 docker-mate 的 Card / Table 风格)
+// 渲染与终端工具栏配套的紧凑深色传输面板
 func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 	tasks := s.TransferMgr.GetTasks()
+	textColor := ui.Hex("#D4D4D8")
+	mutedColor := ui.Hex("#A1A1AA")
+	// 最多展示四行任务，空队列只占一行内容高度
+	visibleRows := min(max(len(tasks), 1), 4)
+	panelHeight := float32(29 + visibleRows*28)
 
-	ui.Column(c).Height(150).Background(t.Surface).Border(1, t.Border).Padding(t.Space(2), t.Space(3)).Gap(t.Space(1.5)).Children(func() {
-		// 抽屉头部
-		ui.Row(c).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, IconHardDrive).TextColor(t.Accent).Width(14).Height(14)
-			ui.Text(c, fmt.Sprintf(" 后台传输队列 (共 %d 项)", len(tasks))).FontSize(12).Bold().TextColor(t.Text)
+	ui.Column(c).Height(panelHeight).Shrink(0).Background(ColTerminalBg).Children(func() {
+		ui.Box(c).Height(1).Shrink(0).Background(ui.Hex("#323238"))
+		ui.Row(c).Height(28).Shrink(0).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(5).Children(func() {
+			ui.Icon(c, IconTransfer).TextColor(mutedColor).Width(13).Height(13)
+			ui.Text(c, "传输队列").FontSize(11).TextColor(textColor).SingleLine()
+			ui.Text(c, fmt.Sprintf("(%d)", len(tasks))).FontSize(10.5).TextColor(mutedColor)
 			ui.Spacer(c)
-			if ui.Button(c, "隐藏抽屉").Clicked() {
+			closeBtn := ui.ButtonBase(c).Width(24).Height(24).Radius(4).Center().
+				Tooltip("收起传输队列").Label("收起传输队列")
+			closeColor := mutedColor
+			if closeBtn.Hovered() {
+				closeBtn.Background(ui.Hex("#323238"))
+				closeColor = ui.Hex("#F4F4F5")
+			}
+			closeBtn.Children(func() {
+				ui.Icon(c, IconChevronDown).Width(13).Height(13).TextColor(closeColor)
+			})
+			if closeBtn.Clicked() {
 				s.ShowTransfer = false
 			}
 		})
 
-		ui.Box(c).Height(1).Background(t.Border)
-
-		// 任务列表
-		ui.Scroll(c).Fill().Children(func() {
-			ui.Column(c).Gap(t.Space(1)).Children(func() {
+		ui.Scroll(c).Grow(1).Shrink(1).MinHeight(0).Children(func() {
+			ui.Column(c).Children(func() {
 				if len(tasks) == 0 {
-					ui.Text(c, "暂无进行中的文件传输任务").FontSize(11).TextColor(t.TextMuted)
+					ui.Row(c).Height(28).Padding(0, t.Space(3)).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "暂无传输任务").FontSize(11).TextColor(mutedColor)
+					})
 				}
 
 				for _, task := range tasks {
 					item := task
-					typeBg := ColBadgeBlueBg
-					typeFg := ColBadgeBlueText
+					typeColor := ui.Hex("#93B4D8")
 					if item.Type == transfer.TaskTypeDownload {
-						typeBg = ColBadgePurpleBg
-						typeFg = ColBadgePurpleText
+						typeColor = ui.Hex("#B6A4D6")
 					}
-
-					ui.Row(c).Height(26).Background(ui.Hex("#FAFBFC")).Border(1, t.Border).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-						// 传输类型药丸
-						ui.Row(c).Background(typeBg).Padding(1, 6).Radius(3).Children(func() {
-							ui.Text(c, string(item.Type)).FontSize(10).Bold().TextColor(typeFg)
-						})
-
-						ui.Text(c, item.FileName).FontSize(11).Bold().TextColor(t.Text).Width(180)
+					row := ui.Row(c).Height(28).Shrink(0).Padding(0, t.Space(3)).AlignItems(ui.Center).Gap(8)
+					if row.Hovered() {
+						row.Background(ui.Hex("#27272A"))
+					}
+					row.Children(func() {
+						ui.Text(c, string(item.Type)).FontSize(10).TextColor(typeColor).Shrink(0).SingleLine()
+						ui.Text(c, item.FileName).FontSize(11).TextColor(textColor).
+							Grow(1).Shrink(1).MinWidth(0).SingleLine().Tooltip(item.FileName)
 
 						progressText := fmt.Sprintf("%.1f%% (%s)", item.Percent, item.SpeedHuman)
-						if item.Status == transfer.StatusCompleted {
+						progressColor := mutedColor
+						switch item.Status {
+						case transfer.StatusPending:
+							progressText = "等待中"
+						case transfer.StatusCompleted:
 							progressText = "已完成"
-						} else if item.Status == transfer.StatusFailed {
+						case transfer.StatusFailed:
 							progressText = "失败: " + item.ErrorMsg
-						} else if item.Status == transfer.StatusCanceled {
+							progressColor = ui.Hex("#F87171")
+						case transfer.StatusCanceled:
 							progressText = "已取消"
 						}
-						ui.Text(c, progressText).FontSize(10.5).TextColor(t.TextMuted).Width(160)
+						ui.Text(c, progressText).FontSize(10.5).TextColor(progressColor).
+							Width(160).Shrink(1).MinWidth(0).SingleLine().Tooltip(progressText)
 
-						ui.Spacer(c)
-
-						if item.Status == transfer.StatusRunning || item.Status == transfer.StatusPending {
-							if ui.Button(c, "取消").Clicked() {
-								s.TransferMgr.CancelTask(item.ID)
+						// 预留相同操作宽度，保持各行进度对齐
+						ui.Row(c).Width(36).Shrink(0).Children(func() {
+							if item.Status == transfer.StatusRunning || item.Status == transfer.StatusPending {
+								cancelBtn := ui.ButtonBase(c).Width(36).Height(22).Radius(4).Center().Tooltip("取消传输")
+								cancelColor := mutedColor
+								if cancelBtn.Hovered() {
+									cancelBtn.Background(ui.Hex("#323238"))
+									cancelColor = ui.Hex("#F4F4F5")
+								}
+								cancelBtn.Children(func() {
+									ui.Text(c, "取消").FontSize(10.5).TextColor(cancelColor).SingleLine()
+								})
+								if cancelBtn.Clicked() {
+									s.TransferMgr.CancelTask(item.ID)
+								}
 							}
-						}
+						})
 					})
 				}
 			})
