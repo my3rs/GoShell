@@ -1,5 +1,7 @@
 APP_NAME    ?= GoShell
-VERSION     ?= $(shell git describe --tags --always 2>/dev/null || echo "0.3.0")
+VERSION     ?= dev
+VERSION_PKG := goshell/internal/version
+VERSION_LDFLAGS := -X $(VERSION_PKG).Version=$(VERSION)
 MAIN_SRC    := ./cmd/goshell
 OUT_DIR     := bin
 ICON_ICO    := assets/brand/app-icon.ico
@@ -36,7 +38,7 @@ fetch-natives:
 build:
 	@mkdir -p $(OUT_DIR)
 	@echo "==> 编译本地版本..."
-	go build -trimpath -ldflags="-s -w" -o $(OUT_DIR)/goshell $(MAIN_SRC)
+	go build -trimpath -ldflags="$(VERSION_LDFLAGS) -s -w" -o $(OUT_DIR)/goshell $(MAIN_SRC)
 	@echo "==> 生成成功: $(OUT_DIR)/goshell"
 
 ## run: 本地启动运行
@@ -67,7 +69,7 @@ build-windows: ensure-winres
 	@trap 'rm -f cmd/goshell/*.syso' EXIT; \
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
 		-trimpath \
-		-ldflags="-H windowsgui -s -w" \
+		-ldflags="-H windowsgui $(VERSION_LDFLAGS) -s -w" \
 		-o $(OUT_DIR)/$(APP_NAME).exe \
 		$(MAIN_SRC)
 	@echo "==> [3/3] 部署离线终端引擎 ghostty-vt.dll 与 busybox.exe 到输出目录..."
@@ -93,7 +95,7 @@ build-windows-arm64: ensure-winres
 	@trap 'rm -f cmd/goshell/*.syso' EXIT; \
 	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build \
 		-trimpath \
-		-ldflags="-H windowsgui -s -w" \
+		-ldflags="-H windowsgui $(VERSION_LDFLAGS) -s -w" \
 		-o $(OUT_DIR)/$(APP_NAME)-arm64.exe \
 		$(MAIN_SRC)
 	@cp $(NATIVES_DIR)/windows-arm64/ghostty-vt.dll $(OUT_DIR)/ghostty-vt.dll
@@ -115,7 +117,7 @@ package-windows: build-windows
 build-darwin:
 	@mkdir -p $(OUT_DIR)
 	@echo "==> 编译 macOS 版本..."
-	go build -trimpath -ldflags="-s -w" -o $(OUT_DIR)/$(APP_NAME)-darwin $(MAIN_SRC)
+	go build -trimpath -ldflags="$(VERSION_LDFLAGS) -s -w" -o $(OUT_DIR)/$(APP_NAME)-darwin $(MAIN_SRC)
 	@ARCH=$$(uname -m | sed 's/x86_64/amd64/'); \
 	if [ -f $(NATIVES_DIR)/darwin-$$ARCH/libghostty-vt.dylib ]; then \
 		cp $(NATIVES_DIR)/darwin-$$ARCH/libghostty-vt.dylib $(OUT_DIR)/; \
@@ -126,7 +128,7 @@ build-darwin:
 build-linux:
 	@mkdir -p $(OUT_DIR)
 	@echo "==> 编译 Linux amd64 版本..."
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o $(OUT_DIR)/$(APP_NAME)-linux $(MAIN_SRC)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(VERSION_LDFLAGS) -s -w" -o $(OUT_DIR)/$(APP_NAME)-linux $(MAIN_SRC)
 	@cp $(NATIVES_DIR)/linux-amd64/libghostty-vt.so $(OUT_DIR)/
 	@echo "==> 生成成功: $(OUT_DIR)/$(APP_NAME)-linux"
 

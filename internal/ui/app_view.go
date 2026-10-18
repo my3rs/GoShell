@@ -16,6 +16,7 @@ import (
 	"goshell/internal/app"
 	"goshell/internal/core/model"
 	sftpService "goshell/internal/core/sftp"
+	"goshell/internal/version"
 )
 
 // WorkspaceTabType 定义多标签类型
@@ -1600,7 +1601,7 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 				btnVer.Background(ui.Hex("#DFE5EC"))
 			}
 			btnVer.Children(func() {
-				ui.Text(c, "GoShell v0.3.0").FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, "GoShell v"+version.Version).FontSize(11).TextColor(t.TextMuted)
 			})
 			if btnVer.Clicked() {
 				v.aboutModalOpen = true
@@ -1872,7 +1873,7 @@ func (v *AppView) renderAboutModal(c *ui.Context, t *ui.Theme) {
 			ui.Column(c).Center().Gap(t.Space(1)).Children(func() {
 				ui.Image(c, goShellLogo).Size(48, 48)
 				ui.Text(c, "GoShell").FontSize(18).Bold().TextColor(t.Text)
-				ui.Text(c, "版本 0.3.0").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "版本 "+version.Version).FontSize(12).TextColor(t.TextMuted)
 			})
 
 			// 2. 核心技术致谢 (轻量精简两行列表)
