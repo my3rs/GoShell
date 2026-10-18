@@ -45,6 +45,12 @@ type WorkspaceTab struct {
 	Editor      *EditorFile
 }
 
+// hostDragPayload 只允许同一列表视图代次内的远程主机排序。
+type hostDragPayload struct {
+	HostID     string
+	Generation uint64
+}
+
 // AppView 管理桌面主窗口 UI 状态与事件循环，深度复刻 docker-mate 设计规范
 type AppView struct {
 	app *app.App
@@ -73,10 +79,12 @@ type AppView struct {
 	prevTabTitles   []string
 	recentHostIDs   []string
 
-	// 主机列表拖拽排序状态
-	draggingHostID   string // 当前正在被拖拽的主机 ID
-	dropTargetHostID string // 拖拽目标主机 ID
-	dropPosition     int    // 相对目标位置: -1 为上方, 1 为下方
+	// 拖放由 MyGo 管理；代次用于拒绝视图切换前的载荷。
+	hostDragGeneration uint64
+	hostDragActive     bool
+	hostDragView       string
+	hostReorderError   string
+	hostDropAnim       *ui.Animation
 
 	// 快速布局与多窗格状态 (左右并列、四宫格、单视窗)
 	layoutMode      WorkspaceLayoutMode
@@ -84,13 +92,13 @@ type AppView struct {
 	paneTabIndices  [4]int
 
 	// 新建/编辑主机弹窗表单状态
-	modalOpen    bool
-	formID       string
-	formName     string
-	formAddress  string
-	formPort     string
-	formUsername string
-	formAuthType string // "password", "key", "local"
+	modalOpen     bool
+	formID        string
+	formName      string
+	formAddress   string
+	formPort      string
+	formUsername  string
+	formAuthType  string // "password", "key", "local"
 	formPassword  string
 	formKeyPath   string
 	formShellType string // "auto", "busybox", "powershell", "cmd"
@@ -122,12 +130,14 @@ type AppView struct {
 
 // NewAppView 初始化主窗口 UI 状态
 func NewAppView(application *app.App) *AppView {
+	spring := ui.Snappy
 	v := &AppView{
 		app:             application,
 		theme:           DockerMateTheme(),
 		sidebarWidth:    240, // 紧凑侧边栏宽度
 		sidebarTab:      0,   // 默认展示主机节点
 		localIP:         getLocalIP(),
+		hostDropAnim:    &spring,
 		formPort:        "22",
 		formUsername:    "root",
 		formAuthType:    "password",
@@ -136,7 +146,6 @@ func NewAppView(application *app.App) *AppView {
 		activePaneIndex: 0,
 		paneTabIndices:  [4]int{0, 1, 2, 3},
 	}
-
 
 	return v
 }
@@ -151,6 +160,7 @@ func (v *AppView) View(c *ui.Context) {
 		v.ToggleSidebar()
 	}
 
+	v.syncHostDragView()
 	ui.Column(c).Fill().Background(t.Background).Children(func() {
 		// 1. 主体工作区（折叠时工作区 100% 铺满，展开时双栏并列可自由拖拽调节宽度）
 		if v.sidebarCollapsed {
@@ -191,6 +201,7 @@ func (v *AppView) View(c *ui.Context) {
 // ToggleSidebar 切换左侧边栏的展开与折叠状态 (支持快捷键 Cmd+B / Ctrl+B)
 func (v *AppView) ToggleSidebar() {
 	v.sidebarCollapsed = !v.sidebarCollapsed
+	v.syncHostDragView()
 	if !v.sidebarCollapsed && v.sidebarWidth < 180 {
 		v.sidebarWidth = 240
 	}
@@ -296,6 +307,7 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 		})
 
 		// 3. 视窗内容分流：主机列表平铺或文件浏览
+		v.syncHostDragView()
 		if v.sidebarTab == 0 {
 			v.renderSidebarHostList(c, t)
 		} else {
@@ -348,9 +360,14 @@ func (v *AppView) getSessionCount() int {
 // 侧边栏内容 1: 主机平铺列表 (完全平铺，无分组，顶部集成紧凑搜索)
 func (v *AppView) renderSidebarHostList(c *ui.Context, t *ui.Theme) {
 	// 边栏搜索框：直接位于列表顶部，消除对主区域空间的占用
-	ui.TextInput(c, &v.searchQuery).Placeholder("搜索主机...")
-
-	ui.Scroll(c).Fill().Children(func() {
+	ui.TextInput(c.Key("host-search"), &v.searchQuery).Placeholder("搜索主机...")
+	v.syncHostDragView()
+	if v.hostReorderError != "" {
+		ui.Text(c, v.hostReorderError).Key("host-reorder-error").FontSize(11).TextColor(t.Danger)
+	}
+	wasDragging := v.hostDragActive
+	dragging := false
+	ui.Scroll(c).Key("host-list-scroll").Fill().Children(func() {
 		ui.Column(c).Gap(1).Children(func() {
 			query := strings.ToLower(strings.TrimSpace(v.searchQuery))
 
@@ -359,7 +376,9 @@ func (v *AppView) renderSidebarHostList(c *ui.Context, t *ui.Theme) {
 				if query != "" && !strings.Contains(strings.ToLower(h.Name), query) && !strings.Contains(strings.ToLower(h.Address), query) {
 					continue
 				}
-				v.renderHostRow(c, t, h)
+				if v.renderHostRow(c, t, h) {
+					dragging = true
+				}
 				count++
 			}
 
@@ -370,6 +389,32 @@ func (v *AppView) renderSidebarHostList(c *ui.Context, t *ui.Theme) {
 			}
 		})
 	})
+	v.hostDragActive = dragging
+	if wasDragging != dragging {
+		c.Invalidate()
+	}
+}
+
+// syncHostDragView 使切换、折叠和搜索之前的拖放失效。
+func (v *AppView) syncHostDragView() {
+	view := fmt.Sprintf("%t/%d/%s", v.sidebarCollapsed, v.sidebarTab, v.searchQuery)
+	if view != v.hostDragView {
+		v.hostDragView = view
+		v.hostDragGeneration++
+		v.hostDragActive = false
+	}
+}
+
+func (v *AppView) validHostDrag(payload hostDragPayload, targetID string) bool {
+	return payload.Generation == v.hostDragGeneration && payload.HostID != targetID &&
+		!v.sidebarCollapsed && v.sidebarTab == 0 && strings.TrimSpace(v.searchQuery) == ""
+}
+
+func (v *AppView) reportHostReorder(err error) {
+	v.hostReorderError = ""
+	if err != nil {
+		v.hostReorderError = fmt.Sprintf("主机排序保存失败：%v", err)
+	}
 }
 
 // 侧边栏内容 2: 远程文件管理器 (多窗格下自动展示处于 active 格主机的文件)
@@ -390,15 +435,14 @@ func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
 		return
 	}
 
-
 	activeSession.RenderSidebarFileExplorer(c, t, func(entry sftpService.FileEntry) {
 		v.openFileInEditor(activeSession, entry)
 	})
 	v.showHiddenFiles = activeSession.ShowHidden
 }
 
-// 辅助渲染单行主机项 (复刻现代侧边栏菜单按钮，支持拖拽手柄排序、双击连接与右键快捷操作)
-func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
+// 辅助渲染单行主机项 (复刻现代侧边栏菜单按钮，支持整行拖拽排序、双击连接与右键快捷操作)
+func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) bool {
 	host := h
 	isLocal := host.AuthType == model.AuthTypeLocal
 	isSearching := strings.TrimSpace(v.searchQuery) != ""
@@ -413,33 +457,22 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 	isFirstRemote := len(remoteHosts) > 0 && remoteHosts[0].ID == host.ID
 	isLastRemote := len(remoteHosts) > 0 && remoteHosts[len(remoteHosts)-1].ID == host.ID
 
-	ui.Column(c).Key("host-wrap-" + host.ID).Gap(0).Children(func() {
-		// 拖拽插入指示线（上方）
-		if !isLocal && !isSearching && v.dropTargetHostID == host.ID && v.dropPosition < 0 && v.draggingHostID != "" && v.draggingHostID != host.ID {
-			ui.Box(c).Height(2).Background(ui.Hex("#0284C7")).Radius(1).Margin(1, 4)
-		}
-
-		row := ui.Row(c).Key(host.ID).Height(38).Background(ui.Transparent).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1))
+	isDraggingCurrent := false
+	wrap := ui.Column(c).Key("host-wrap-" + host.ID).Gap(0)
+	if v.hostDropAnim != nil {
+		wrap.Transition(ui.ElementTransition{Animation: v.hostDropAnim, Position: true})
+	}
+	wrap.Children(func() {
+		row := ui.Row(c).Key(fmt.Sprintf("host-row-%d-%s", v.hostDragGeneration, host.ID)).Height(38).Shrink(0).Background(ui.Transparent).Padding(0, t.Space(2)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1))
 		isHovered := row.Hovered()
-		isDraggingCurrent := v.draggingHostID == host.ID
-
+		if !isLocal && !isSearching {
+			row.Drag(hostDragPayload{HostID: host.ID, Generation: v.hostDragGeneration})
+			isDraggingCurrent = row.Dragging()
+		}
 		if isDraggingCurrent {
 			row.Background(ui.Hex("#E0F2FE")).Opacity(0.65)
 		} else if isHovered {
 			row.Background(ColSidebarHover)
-		}
-
-		// 拖拽悬停判定 (仅对非本地主机生效，搜索过滤时不生效)
-		if !isLocal && !isSearching && v.draggingHostID != "" && v.draggingHostID != host.ID {
-			_, posY, isOver := row.PointerPosition()
-			if isOver {
-				v.dropTargetHostID = host.ID
-				if posY < 19 {
-					v.dropPosition = -1 // 插入到目标上方
-				} else {
-					v.dropPosition = 1  // 插入到目标下方
-				}
-			}
 		}
 
 		// 右键上下文菜单：切换终端、新建终端、编辑、上移/下移、删除
@@ -464,10 +497,10 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 			if !isLocal && !isSearching {
 				m.Separator()
 				if m.Item("上移").Disabled(isFirstRemote).Chosen() {
-					_ = v.moveHostRelative(host.ID, -1)
+					v.reportHostReorder(v.moveHostRelative(host.ID, -1))
 				}
 				if m.Item("下移").Disabled(isLastRemote).Chosen() {
-					_ = v.moveHostRelative(host.ID, 1)
+					v.reportHostReorder(v.moveHostRelative(host.ID, 1))
 				}
 			}
 			m.Separator()
@@ -479,62 +512,66 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) {
 			}
 		})
 
-		// 监听整行拖拽（仅对非本地主机生效，搜索过滤时不生效）
-		if !isLocal && !isSearching {
-			if _, _, dragged := row.Dragged(); dragged {
-				v.draggingHostID = host.ID
-			}
-			if _, _, ended := row.DragEnded(); ended {
-				if v.draggingHostID == host.ID {
-					if v.dropTargetHostID != "" && v.dropTargetHostID != host.ID {
-						_ = v.reorderHosts(host.ID, v.dropTargetHostID, v.dropPosition)
-					}
-					v.draggingHostID = ""
-					v.dropTargetHostID = ""
-					v.dropPosition = 0
-				}
-			}
-		}
-
 		row.Children(func() {
-			// 主机信息（左侧无多余空白，所有主机项统一左对齐）
-			ui.Column(c).Grow(1).Gap(1).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-					ui.Text(c, host.Name).FontSize(12).Bold().TextColor(t.Text)
-					if isLocal {
-						ui.Row(c).Background(ui.Hex("#E0F2FE")).Padding(1, 4).Radius(3).Children(func() {
-							ui.Text(c, "置顶").FontSize(9).Bold().TextColor(ui.Hex("#0369A1"))
-						})
-					}
+			// 名称与地址共享可收缩空间，操作区宽度保持固定。
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(1).Children(func() {
+				ui.Row(c).MinWidth(0).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, host.Name).Shrink(1).MinWidth(0).SingleLine().Tooltip(host.Name).FontSize(12).Bold().TextColor(t.Text)
 				})
 				if isLocal {
 					ui.Text(c, "本地终端").FontSize(10.5).TextColor(ColSidebarText)
 				} else {
-					ui.Text(c, fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)).FontSize(10.5).TextColor(ColSidebarText)
+					address := fmt.Sprintf("%s@%s:%d", host.Username, host.Address, host.Port)
+					ui.Text(c, address).Shrink(1).MinWidth(0).SingleLine().Tooltip(address).FontSize(10.5).TextColor(ColSidebarText)
 				}
 			})
 
-			// 快捷操作区 (hover 时显示连接按钮与抓手提示，平时零占用零留白)
-			if isHovered && v.draggingHostID == "" {
-				ui.Row(c).AlignItems(ui.Center).Gap(2).Children(func() {
-					if ui.Button(c, "连接").Height(22).Padding(0, 8).FontSize(11).Radius(t.Radius - 2).Border(0, ui.Transparent).Clicked() {
+			ui.Row(c).Key("host-actions-" + host.ID).Width(62).Shrink(0).AlignItems(ui.Center).Justify(ui.End).Gap(2).Children(func() {
+				if isHovered && !v.hostDragActive && !isDraggingCurrent {
+					if ui.Button(c.Key("host-connect-"+host.ID), "连接").Width(48).Height(22).Padding(0, 8).FontSize(11).Radius(t.Radius-2).Border(0, ui.Transparent).Clicked() {
 						v.openNewHostSession(host)
 					}
-					if !isLocal && !isSearching {
-						ui.Icon(c, IconGripVertical).Width(12).Height(12).TextColor(t.TextMuted)
+				}
+				// 本地终端固定置顶且不可拖拽，用常驻图钉占据右侧手柄位，说明该行为何没有拖拽手柄。
+				if isLocal {
+					ui.Icon(c, IconPin).Width(12).Height(12).TextColor(ui.Hex("#0369A1")).Tooltip("已置顶，不可拖拽排序").Label("置顶")
+				} else if isHovered && !v.hostDragActive && !isDraggingCurrent && !isSearching {
+					ui.Icon(c, IconGripVertical).Width(12).Height(12).TextColor(t.TextMuted)
+				}
+			})
+
+			// 接收区只在拖动期间参与命中，平时让点击到达文字和连接按钮。
+			if !isLocal && !isSearching {
+				for _, position := range []int{-1, 1} {
+					key, top := "host-drop-before-", float32(0)
+					if position > 0 {
+						key, top = "host-drop-after-", 19
 					}
-				})
+					target := ui.Box(c).Key(key + host.ID).Absolute().Left(0).Right(0).Top(top).Height(19)
+					if !v.hostDragActive {
+						target.PassThrough()
+					}
+					if payload, ok := ui.Drop[hostDragPayload](target); ok && v.validHostDrag(payload, host.ID) {
+						v.reportHostReorder(v.reorderHosts(payload.HostID, host.ID, position))
+					}
+					if payload, ok := ui.DragOver[hostDragPayload](target); ok && v.validHostDrag(payload, host.ID) {
+						row.DrawOver(func(p *ui.Painter, r ui.Rect) {
+							y := r.Y
+							if position > 0 {
+								y += r.H - 2
+							}
+							p.Fill(ui.Rect{X: r.X + 4, Y: y, W: max(0, r.W-8), H: 2}, ui.Hex("#0284C7"), 1)
+						})
+					}
+				}
 			}
 		})
 		if row.DoubleClicked() {
 			v.openHostSession(host)
 		}
 
-		// 拖拽插入指示线（下方）
-		if !isLocal && !isSearching && v.dropTargetHostID == host.ID && v.dropPosition > 0 && v.draggingHostID != "" && v.draggingHostID != host.ID {
-			ui.Box(c).Height(2).Background(ui.Hex("#0284C7")).Radius(1).Margin(1, 4)
-		}
 	})
+	return isDraggingCurrent
 }
 
 // 右侧工作区 (多标签管理 + 快速多视窗布局 + 概览仪表盘 / 全屏终端 / 就地代码编辑器)
@@ -646,7 +683,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				tabKey := fmt.Sprintf("ws_tab_%d_%d", index, tab.Type)
 				tabCard := ui.Row(c).Key(tabKey).Height(28).AlignItems(ui.Center).Gap(t.Space(1.5)).
 					Background(cardBg).
-					Radius(t.Radius - 2).
+					Radius(t.Radius-2).
 					Padding(0, 10).
 					Shrink(1).
 					MaxWidth(220)
@@ -1482,15 +1519,8 @@ func (v *AppView) renderRecentHostRow(c *ui.Context, t *ui.Theme, host *model.Ho
 	}
 
 	row.Children(func() {
-		// 主机名称与标识药丸
-		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Text(c, host.Name).FontSize(12).Bold().TextColor(t.Text)
-			if isLocal {
-				ui.Row(c).Background(ui.Hex("#E0F2FE")).Padding(1, 4).Radius(3).Children(func() {
-					ui.Text(c, "置顶").FontSize(9).Bold().TextColor(ui.Hex("#0369A1"))
-				})
-			}
-		})
+		// 主机名称 (最近连接按时间倒序，不体现置顶与拖动排序状态)
+		ui.Text(c, host.Name).FontSize(12).Bold().TextColor(t.Text)
 
 		// 连接网络参数
 		if isLocal {
@@ -1504,10 +1534,10 @@ func (v *AppView) renderRecentHostRow(c *ui.Context, t *ui.Theme, host *model.Ho
 		// 快捷操作按钮 (hover时才显示，统一使用无边框紧凑按钮，风格与左侧列表保持完全一致)
 		if isHovered {
 			ui.Row(c).Gap(t.Space(1)).Children(func() {
-				if ui.Button(c, "连接").Height(22).Padding(0, 8).FontSize(11).Radius(t.Radius - 2).Border(0, ui.Transparent).Clicked() {
+				if ui.Button(c, "连接").Height(22).Padding(0, 8).FontSize(11).Radius(t.Radius-2).Border(0, ui.Transparent).Clicked() {
 					v.openNewHostSession(host)
 				}
-				if ui.Button(c, "编辑").Height(22).Padding(0, 8).FontSize(11).Radius(t.Radius - 2).Border(0, ui.Transparent).Clicked() {
+				if ui.Button(c, "编辑").Height(22).Padding(0, 8).FontSize(11).Radius(t.Radius-2).Border(0, ui.Transparent).Clicked() {
 					v.openEditModal(host)
 				}
 			})
@@ -2116,7 +2146,7 @@ func (v *AppView) openEditModal(h *model.Host) {
 
 // reorderHosts 响应拖拽放置操作，调整主机列表顺序并持久化
 func (v *AppView) reorderHosts(dragID, targetID string, position int) error {
-	if dragID == "" || targetID == "" || dragID == targetID {
+	if dragID == "" || targetID == "" || dragID == targetID || (position != -1 && position != 1) {
 		return nil
 	}
 
@@ -2171,7 +2201,12 @@ func (v *AppView) reorderHosts(dragID, targetID string, position int) error {
 	result = append(result, dragID)
 	result = append(result, newIDs[insertIdx:]...)
 
-	return v.app.ReorderHosts(result)
+	for i, id := range result {
+		if id != remoteIDs[i] {
+			return v.app.ReorderHosts(result)
+		}
+	}
+	return nil
 }
 
 // moveHostRelative 上移或下移指定主机（delta: -1 为上移，1 为下移）
@@ -2297,18 +2332,35 @@ func (v *AppView) saveHostForm() {
 		}
 	}
 
+	// 编辑保留当前位置；新建追加在已有远程主机之后。
+	sortOrder := 0
+	if v.formID != "" {
+		for _, existing := range v.app.Hosts {
+			if existing.ID == v.formID {
+				sortOrder = existing.SortOrder
+				break
+			}
+		}
+	} else {
+		for _, existing := range v.app.Hosts {
+			if existing.AuthType != model.AuthTypeLocal && existing.SortOrder >= sortOrder {
+				sortOrder = existing.SortOrder + 1
+			}
+		}
+	}
 	h := &model.Host{
-		ID:          v.formID,
-		GroupID:     v.formGroupID,
-		Name:        strings.TrimSpace(v.formName),
-		Address:     address,
-		Port:        port,
-		Username:    strings.TrimSpace(v.formUsername),
-		AuthType:    authType,
-		Password:    v.formPassword,
-		KeyPath:     strings.TrimSpace(v.formKeyPath),
-		ShellType:   shellType,
-		ColorTag:    "#0366D6",
+		SortOrder: sortOrder,
+		ID:        v.formID,
+		GroupID:   v.formGroupID,
+		Name:      strings.TrimSpace(v.formName),
+		Address:   address,
+		Port:      port,
+		Username:  strings.TrimSpace(v.formUsername),
+		AuthType:  authType,
+		Password:  v.formPassword,
+		KeyPath:   strings.TrimSpace(v.formKeyPath),
+		ShellType: shellType,
+		ColorTag:  "#0366D6",
 	}
 
 	if err := v.app.Store.SaveHost(h); err != nil {
@@ -2331,10 +2383,10 @@ func (v *AppView) openLocalTerminal() {
 
 	// 若未在列表中，临时构造一个并打开
 	localHost := &model.Host{
-		ID:          "local",
-		Name:        "本地终端",
-		Address:     "localhost",
-		AuthType:    model.AuthTypeLocal,
+		ID:       "local",
+		Name:     "本地终端",
+		Address:  "localhost",
+		AuthType: model.AuthTypeLocal,
 	}
 	v.openHostSession(localHost)
 }
@@ -2348,10 +2400,10 @@ func (v *AppView) openNewLocalTerminal() {
 		}
 	}
 	localHost := &model.Host{
-		ID:          "local",
-		Name:        "本地终端",
-		Address:     "localhost",
-		AuthType:    model.AuthTypeLocal,
+		ID:       "local",
+		Name:     "本地终端",
+		Address:  "localhost",
+		AuthType: model.AuthTypeLocal,
 	}
 	v.openNewHostSession(localHost)
 }

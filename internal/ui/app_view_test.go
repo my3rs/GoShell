@@ -1325,9 +1325,11 @@ func TestAppView_HostReorderLogic(t *testing.T) {
 	_ = store.SaveHost(h3)
 	_ = appInstance.ReloadData()
 
+	spring := ui.Snappy
 	v := &AppView{
-		app:   appInstance,
-		theme: DockerMateTheme(),
+		app:          appInstance,
+		theme:        DockerMateTheme(),
+		hostDropAnim: &spring,
 	}
 
 	// 初始状态：index 0 本机，后面为 rem-1, rem-2, rem-3
