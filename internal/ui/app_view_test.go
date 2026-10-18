@@ -1145,3 +1145,276 @@ func TestAppView_SidebarNoPersistentActiveAndDashboardCards(t *testing.T) {
 	}
 }
 
+func TestHostModal_PrivateKeyDefaultAndChooser(t *testing.T) {
+	// 1. 验证 getDefaultPrivateKeyPath 基础返回值
+	defaultPath := getDefaultPrivateKeyPath()
+	if !strings.HasPrefix(defaultPath, "~/.ssh/") {
+		t.Errorf("expected defaultPath to start with ~/.ssh/, got %q", defaultPath)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "goshell_test_key.db")
+	cipher, err := security.NewCipherService("")
+	if err != nil {
+		t.Fatalf("failed to init cipher: %v", err)
+	}
+	store, err := storage.Open(dbPath, cipher)
+	if err != nil {
+		t.Fatalf("failed to open storage: %v", err)
+	}
+	defer store.Close()
+
+	testApp := &app.App{
+		Store: store,
+		Hosts: []*model.Host{},
+	}
+	v := NewAppView(testApp)
+
+	// 2. 验证新建主机弹窗的私钥路径默认值已注入
+	v.openCreateModal()
+	if !v.modalOpen {
+		t.Fatalf("expected modalOpen = true")
+	}
+	if v.formKeyPath != defaultPath {
+		t.Errorf("expected v.formKeyPath = %q, got %q", defaultPath, v.formKeyPath)
+	}
+
+	// 3. 模拟用户清空后，在切换到私钥认证时重新补齐默认值
+	v.formKeyPath = ""
+	v.formAuthType = "password"
+	// 切换到私钥认证
+	v.formAuthType = "key"
+	if strings.TrimSpace(v.formKeyPath) == "" {
+		v.formKeyPath = getDefaultPrivateKeyPath()
+	}
+	if v.formKeyPath != defaultPath {
+		t.Errorf("expected v.formKeyPath to restore default %q, got %q", defaultPath, v.formKeyPath)
+	}
+
+	// 4. 保存私钥主机配置
+	v.formName = "私钥测试主机"
+	v.formAddress = "10.0.0.1"
+	v.formPort = "22"
+	v.formUsername = "admin"
+	v.formAuthType = "key"
+	v.formKeyPath = "~/.ssh/id_test"
+	v.saveHostForm()
+	if v.modalOpen {
+		t.Fatalf("expected modalOpen = false after save")
+	}
+
+	hosts, err := store.ListHosts()
+	if err != nil {
+		t.Fatalf("failed to list hosts: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	saved := hosts[0]
+	if saved.KeyPath != "~/.ssh/id_test" {
+		t.Errorf("expected saved KeyPath = ~/.ssh/id_test, got %q", saved.KeyPath)
+	}
+	if saved.AuthType != model.AuthTypeKeyFile {
+		t.Errorf("expected saved AuthType = key_file, got %q", saved.AuthType)
+	}
+
+	// 5. 打开已有主机的编辑弹窗，保留其私钥路径
+	v.openEditModal(saved)
+	if v.formKeyPath != "~/.ssh/id_test" {
+		t.Errorf("expected openEditModal to preserve custom key path, got %q", v.formKeyPath)
+	}
+
+	// 6. 若编辑已有主机但私钥路径为空，应补齐默认值
+	emptyKeyHost := &model.Host{
+		ID:       "host-empty-key",
+		Name:     "空私钥主机",
+		Address:  "10.0.0.2",
+		Port:     22,
+		AuthType: model.AuthTypeKeyFile,
+		KeyPath:  "",
+	}
+	v.openEditModal(emptyKeyHost)
+	if v.formKeyPath != defaultPath {
+		t.Errorf("expected empty key host to receive default key path %q, got %q", defaultPath, v.formKeyPath)
+	}
+}
+
+func TestAppView_SidebarFilePanel_NoActiveSession_Centered(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{
+				{ID: "h1", Name: "Host-1", Address: "1.1.1.1"},
+			},
+		},
+		theme: DockerMateTheme(),
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+		},
+		sidebarTab:   1,
+		sidebarWidth: 240,
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 1000, 600)
+
+	tt.Frame()
+	tt.Frame()
+
+	// 1. 验证文案与按钮渲染
+	rectTitle, okTitle := tt.Find("暂无活跃终端连接")
+	if !okTitle {
+		t.Fatalf("Expected to find '暂无活跃终端连接' in sidebar")
+	}
+
+	rectDesc, okDesc := tt.Find("请在主机列表中连接服务器以浏览文件。")
+	if !okDesc {
+		t.Fatalf("Expected to find description text in sidebar")
+	}
+
+	rectBtn, okBtn := tt.Find("前往主机列表")
+	if !okBtn {
+		t.Fatalf("Expected to find '前往主机列表' button in sidebar")
+	}
+
+	// 2. 验证标题和描述在侧边栏横向范围（默认宽约 240px）处于居中区域
+	sidebarWidth := float32(240)
+	titleCenter := rectTitle.X + rectTitle.W/2
+	descCenter := rectDesc.X + rectDesc.W/2
+	btnCenter := rectBtn.X + rectBtn.W/2
+
+	// 居中偏移不应超过 30px
+	if titleCenter < sidebarWidth/2-30 || titleCenter > sidebarWidth/2+30 {
+		t.Errorf("Title center %v is not well centered within sidebar width %v", titleCenter, sidebarWidth)
+	}
+	if descCenter < sidebarWidth/2-30 || descCenter > sidebarWidth/2+30 {
+		t.Errorf("Description center %v is not well centered within sidebar width %v", descCenter, sidebarWidth)
+	}
+	if btnCenter < sidebarWidth/2-30 || btnCenter > sidebarWidth/2+30 {
+		t.Errorf("Button center %v is not well centered within sidebar width %v", btnCenter, sidebarWidth)
+	}
+
+	// 3. 验证点击“前往主机列表”按钮能够成功切回 Tab 0 (主机列表)
+	tt.Click("前往主机列表")
+	tt.Frame()
+
+	if v.sidebarTab != 0 {
+		t.Errorf("Expected sidebarTab to be 0 after clicking button, got %d", v.sidebarTab)
+	}
+}
+
+func TestAppView_HostReorderLogic(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "ui_reorder_test.db")
+	cipher, _ := security.NewCipherService("")
+	store, _ := storage.Open(dbPath, cipher)
+	defer store.Close()
+
+	appInstance := &app.App{
+		Store:   store,
+		DataDir: tempDir,
+	}
+
+	hLocal := &model.Host{ID: "local-1", Name: "本机终端", AuthType: model.AuthTypeLocal}
+	h1 := &model.Host{ID: "rem-1", Name: "Web 01", Address: "10.0.0.1", AuthType: model.AuthTypePassword, SortOrder: 0}
+	h2 := &model.Host{ID: "rem-2", Name: "Web 02", Address: "10.0.0.2", AuthType: model.AuthTypePassword, SortOrder: 1}
+	h3 := &model.Host{ID: "rem-3", Name: "Web 03", Address: "10.0.0.3", AuthType: model.AuthTypePassword, SortOrder: 2}
+
+	_ = store.SaveHost(hLocal)
+	_ = store.SaveHost(h1)
+	_ = store.SaveHost(h2)
+	_ = store.SaveHost(h3)
+	_ = appInstance.ReloadData()
+
+	v := &AppView{
+		app:   appInstance,
+		theme: DockerMateTheme(),
+	}
+
+	// 初始状态：index 0 本机，后面为 rem-1, rem-2, rem-3
+	if v.app.Hosts[1].ID != "rem-1" || v.app.Hosts[2].ID != "rem-2" || v.app.Hosts[3].ID != "rem-3" {
+		t.Fatalf("initial hosts order mismatch")
+	}
+
+	// 1. 测试将 rem-3 拖拽到 rem-1 上方 (position = -1)
+	err := v.reorderHosts("rem-3", "rem-1", -1)
+	if err != nil {
+		t.Fatalf("reorderHosts failed: %v", err)
+	}
+	if v.app.Hosts[1].ID != "rem-3" || v.app.Hosts[2].ID != "rem-1" || v.app.Hosts[3].ID != "rem-2" {
+		t.Fatalf("order after moving rem-3 above rem-1 mismatch: got [%s, %s, %s]",
+			v.app.Hosts[1].ID, v.app.Hosts[2].ID, v.app.Hosts[3].ID)
+	}
+
+	// 2. 测试将 rem-3 拖拽到 rem-1 下方 (position = 1)
+	err = v.reorderHosts("rem-3", "rem-1", 1)
+	if err != nil {
+		t.Fatalf("reorderHosts failed: %v", err)
+	}
+	if v.app.Hosts[1].ID != "rem-1" || v.app.Hosts[2].ID != "rem-3" || v.app.Hosts[3].ID != "rem-2" {
+		t.Fatalf("order after moving rem-3 below rem-1 mismatch: got [%s, %s, %s]",
+			v.app.Hosts[1].ID, v.app.Hosts[2].ID, v.app.Hosts[3].ID)
+	}
+
+	// 3. 测试右键上移/下移
+	// rem-3 在 index 2，对其上移 delta = -1，应与 rem-1 互换
+	err = v.moveHostRelative("rem-3", -1)
+	if err != nil {
+		t.Fatalf("moveHostRelative up failed: %v", err)
+	}
+	if v.app.Hosts[1].ID != "rem-3" || v.app.Hosts[2].ID != "rem-1" {
+		t.Fatalf("order after moveHostRelative up mismatch: [%s, %s]", v.app.Hosts[1].ID, v.app.Hosts[2].ID)
+	}
+
+	// rem-3 此时在首位，再次上移应无操作且返回 nil
+	err = v.moveHostRelative("rem-3", -1)
+	if err != nil {
+		t.Fatalf("moveHostRelative out of bounds should return nil, got %v", err)
+	}
+
+	// 4. 本地终端始终置顶排在第 0 位
+	if v.app.Hosts[0].AuthType != model.AuthTypeLocal {
+		t.Fatalf("local host should always remain at index 0")
+	}
+}
+
+func TestAppView_SidebarHostList_RenderGripAndSearch(t *testing.T) {
+	v := &AppView{
+		app: &app.App{
+			Hosts: []*model.Host{
+				{ID: "local-host", Name: "本机终端", AuthType: model.AuthTypeLocal},
+				{ID: "remote-1", Name: "生产服务器-01", Address: "10.0.0.1", AuthType: model.AuthTypePassword},
+			},
+		},
+		theme: DockerMateTheme(),
+		tabs: []WorkspaceTab{
+			{Type: TabTypeOverview, Title: "概览"},
+		},
+		sidebarTab:   0,
+		sidebarWidth: 240,
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		v.View(c)
+	}, 1000, 600)
+
+	tt.Frame()
+	tt.Frame()
+
+	// 验证主机名称正确渲染
+	if _, ok := tt.Find("本机终端"); !ok {
+		t.Fatalf("Expected to find '本机终端' in sidebar")
+	}
+	if _, ok := tt.Find("生产服务器-01"); !ok {
+		t.Fatalf("Expected to find '生产服务器-01' in sidebar")
+	}
+
+	// 搜索过滤：输入不存在的主机
+	v.searchQuery = "not-exist-server"
+	tt.Frame()
+	if _, ok := tt.Find("未找到匹配主机"); !ok {
+		t.Fatalf("Expected to find '未找到匹配主机' when filter has no match")
+	}
+}
+
+
+
