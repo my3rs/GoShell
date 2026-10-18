@@ -1,0 +1,192 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to use for a manual build
+        required: true
+        default: dev
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: GoShell
+  GO_VERSION: '1.27.1'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Run tests
+        run: go test ./...
+
+  windows:
+    name: Windows packages
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build Windows executable
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          make build-windows VERSION="$VERSION"
+          mkdir -p dist/zip dist/msi
+          cp "bin/${APP_NAME}.exe" dist/zip/
+          cp bin/ghostty-vt.dll dist/zip/
+          if [ -f bin/busybox.exe ]; then cp bin/busybox.exe dist/zip/; fi
+          cp "bin/${APP_NAME}.exe" "dist/${APP_NAME}-v${VERSION}-windows-amd64.exe"
+          cd dist/zip
+          7z a -tzip "../${APP_NAME}-v${VERSION}-windows-amd64.zip" .
+      - name: Install WiX Toolset
+        shell: powershell
+        run: dotnet tool install --global wix --version 5.*
+      - name: Build MSI
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          wix build packaging/windows/GoShell.wxs \
+            -d Version="$VERSION" \
+            -d SourceDir="$PWD/dist/zip" \
+            -o "dist/${APP_NAME}-v${VERSION}-windows-amd64.msi"
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: dist/GoShell-*
+          if-no-files-found: error
+
+  macos:
+    name: macOS Apple Silicon package
+    needs: test
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build macOS app
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          mkdir -p "dist/${APP_NAME}.app/Contents/MacOS" "dist/${APP_NAME}.app/Contents/Resources"
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build \
+            -trimpath -ldflags="-X goshell/internal/version.Version=${VERSION} -s -w" \
+            -o "dist/${APP_NAME}.app/Contents/MacOS/${APP_NAME}" ./cmd/goshell
+          cp assets/brand/app-icon.icns "dist/${APP_NAME}.app/Contents/Resources/app-icon.icns"
+          sed \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{APP_NAME}}/${APP_NAME}/g" \
+            packaging/macos/Info.plist.in > "dist/${APP_NAME}.app/Contents/Info.plist"
+          chmod +x "dist/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
+          hdiutil create \
+            -volname "${APP_NAME}" \
+            -srcfolder "dist/${APP_NAME}.app" \
+            -ov -format UDZO \
+            "dist/${APP_NAME}-v${VERSION}-macos-arm64.dmg"
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-package
+          path: dist/GoShell-*.dmg
+          if-no-files-found: error
+
+  linux:
+    name: Linux DEB and RPM packages
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build Linux files
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          mkdir -p dist/root/usr/bin dist/root/usr/share/applications dist/root/usr/share/icons/hicolor/512x512/apps
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -trimpath -ldflags="-X goshell/internal/version.Version=${VERSION} -s -w" \
+            -o dist/root/usr/bin/goshell ./cmd/goshell
+          cp assets/brand/app-icon-512.png dist/root/usr/share/icons/hicolor/512x512/apps/goshell.png
+          sed \
+            -e "s/{{APP_NAME}}/${APP_NAME}/g" \
+            packaging/linux/goshell.desktop.in > dist/root/usr/share/applications/goshell.desktop
+          chmod +x dist/root/usr/bin/goshell
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+      - name: Build DEB and RPM
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          nfpm package --packager deb --target "dist/${APP_NAME}-v${VERSION}-linux-amd64.deb" \
+            --config packaging/linux/nfpm.yaml --version "$VERSION"
+          nfpm package --packager rpm --target "dist/${APP_NAME}-v${VERSION}-linux-amd64.rpm" \
+            --config packaging/linux/nfpm.yaml --version "$VERSION"
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/GoShell-*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/GoShell-*
