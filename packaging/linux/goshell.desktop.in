@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name={{APP_NAME}}
+Comment=Desktop SSH and SFTP terminal
+Exec=goshell
+Icon=goshell
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+StartupWMClass=GoShell

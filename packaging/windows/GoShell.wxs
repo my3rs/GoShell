@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="GoShell" Manufacturer="GoShell" Version="$(var.Version)" UpgradeCode="6D71B7C3-7A2D-4D80-9AF8-5A5DAAF2C0B7">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of GoShell is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GoShell">
+        <Component Id="MainComponent" Guid="*">
+          <File Source="$(var.SourceDir)\GoShell.exe" KeyPath="yes" />
+          <File Source="$(var.SourceDir)\ghostty-vt.dll" />
+          <File Source="$(var.SourceDir)\busybox.exe" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="MainFeature" Title="GoShell" Level="1">
+      <ComponentRef Id="MainComponent" />
+    </Feature>
+  </Package>
+</Wix>

@@ -1,0 +1,17 @@
+name: goshell
+arch: amd64
+platform: linux
+maintainer: GoShell maintainers
+description: Desktop SSH and SFTP terminal
+vendor: GoShell
+homepage: https://github.com/egoist/goshell
+license: MIT
+contents:
+  - src: dist/root/usr/bin/goshell
+    dst: /usr/bin/goshell
+    file_info:
+      mode: 0755
+  - src: dist/root/usr/share/applications/goshell.desktop
+    dst: /usr/share/applications/goshell.desktop
+  - src: dist/root/usr/share/icons/hicolor/512x512/apps/goshell.png
+    dst: /usr/share/icons/hicolor/512x512/apps/goshell.png
