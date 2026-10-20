@@ -24,12 +24,12 @@ import (
 
 // TerminalSession 代表一个活跃的终端会话实例，整合 SSH 终端与 SFTP 文件服务
 type TerminalSession struct {
-	ID        string
-	Host      *model.Host
-	Title     string
-	Term      *terminal.Terminal
-	Client    *sshClient.Client
-	TermConn  *sshClient.TerminalConn
+	ID       string
+	Host     *model.Host
+	Title    string
+	Term     *terminal.Terminal
+	Client   *sshClient.Client
+	TermConn *sshClient.TerminalConn
 
 	// SFTP 远程文件管理与传输管理器
 	SFTPClient  *sftpService.Client
@@ -43,7 +43,8 @@ type TerminalSession struct {
 	// UI 交互控制
 	ShowTransfer bool
 	selectedPath string
-	ShowHidden   bool // 是否在左侧文件列表中显示隐藏文件 (以 . 开头)
+	ShowHidden   bool                   // 是否在左侧文件列表中显示隐藏文件 (以 . 开头)
+	scrollbar    terminalScrollbarState // 终端滚动条拖拽与悬停状态
 
 	Connecting bool
 	Connected  bool
@@ -511,6 +512,7 @@ func (s *TerminalSession) Disconnect() {
 		_ = s.Term.Close()
 		s.Term = nil
 	}
+	s.scrollbar = terminalScrollbarState{}
 	if s.TermConn != nil {
 		_ = s.TermConn.Close()
 		s.TermConn = nil
@@ -612,7 +614,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 
 			// 断开状态下的重连按钮
 			if !s.Connected && !s.Connecting {
-				if ui.PrimaryButton(c, "重新连接").Clicked() {
+				if terminalPrimaryButton(c, "重新连接").Clicked() {
 					s.Start()
 				}
 			}
@@ -636,9 +638,9 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 				ui.Column(c).Grow(1).Center().Gap(t.Space(3)).Children(func() {
 					ui.Box(c).Width(10).Height(10).Radius(5).Background(t.Danger)
 					ui.Text(c, "会话连接中断").FontSize(15).Bold().TextColor(t.Danger)
-					ui.Text(c, s.ErrorMsg).FontSize(12).TextColor(ui.Hex("#94A3B8"))
+					ui.Text(c, s.ErrorMsg).FontSize(12).TextColor(ColTerminalMuted)
 					ui.Row(c).Gap(t.Space(2)).Children(func() {
-						if ui.PrimaryButton(c, "重新连接").Clicked() {
+						if terminalPrimaryButton(c, "重新连接").Clicked() {
 							s.Start()
 						}
 						if ui.Button(c, "关闭标签页").Clicked() {
@@ -653,6 +655,7 @@ func (s *TerminalSession) Render(c *ui.Context, t *ui.Theme, onClose func(), onS
 				// Ghostty VT 终端 GPU 自绘（占据主屏完整可用高度）
 				if s.Term != nil {
 					termElem := terminal.View(c, s.Term).Grow(1)
+					attachTerminalScrollbar(c, termElem, s.Term, &s.scrollbar, onFocus)
 					if termElem.Focused() && onFocus != nil {
 						onFocus()
 					}
@@ -690,14 +693,14 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 					btn := ui.ButtonBase(c).Tooltip(tooltip).Width(24).Height(24).Radius(t.Radius - 2).Center()
 					iconCol := ColSidebarText
 					if isActive {
-						btn.Background(ui.Hex("#DBEAFE"))
-						iconCol = ui.Hex("#2563EB")
+						btn.Background(ColSidebarActive)
+						iconCol = ColSidebarActiveText
 					}
 					if btn.Hovered() {
 						if isActive {
-							btn.Background(ui.Hex("#BFDBFE"))
+							btn.Background(ColSidebarActive)
 						} else {
-							btn.Background(ui.Hex("#E2E8F0"))
+							btn.Background(ColSidebarHover)
 							iconCol = t.Text
 						}
 					}
@@ -729,7 +732,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 					s.RefreshFiles()
 				})
 
-				// 显示/隐藏隐藏文件 (激活时柔和浅蓝高亮，无需突兀边框与小绿点)
+				// 显示/隐藏隐藏文件，激活时使用中性灰底色。
 				hiddenTooltip := "显示隐藏文件"
 				hiddenIcon := IconEyeOff
 				if s.ShowHidden {
@@ -774,7 +777,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 					borderCol := ui.Transparent
 					if isSel {
 						rowBg = ColSidebarActive
-						borderCol = ui.Hex("#B8C8D8")
+						borderCol = ColSidebarActive
 					}
 
 					row := ui.Row(c).Height(26).Background(rowBg).Border(1, borderCol).Padding(0, t.Space(1.5)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(1.5))
@@ -850,7 +853,7 @@ func (s *TerminalSession) RenderSidebarFileExplorer(c *ui.Context, t *ui.Theme, 
 								ui.Text(c, "d").FontSize(10.5).Bold().TextColor(ui.Hex("#D97706"))
 							})
 						} else {
-							ui.Row(c).Width(16).Height(16).Radius(2).Background(ui.Hex("#F1F5F9")).Center().Children(func() {
+							ui.Row(c).Width(16).Height(16).Radius(2).Background(ColBadgeGrayBg).Center().Children(func() {
 								ui.Text(c, "r").FontSize(10.5).TextColor(t.TextMuted)
 							})
 						}
@@ -969,4 +972,3 @@ func (s *TerminalSession) renderTransferDrawer(c *ui.Context, t *ui.Theme) {
 		})
 	})
 }
-
