@@ -3,7 +3,7 @@ module goshell
 go 1.27.1
 
 require (
-	github.com/egoist/mygo v0.5.1
+	github.com/egoist/mygo v0.5.5
 	github.com/google/uuid v1.6.0
 	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.58.0
