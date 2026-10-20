@@ -1,9 +1,10 @@
-// Command brandgen regenerates GoShell's vector and desktop icon assets.
-// Run from the repository root: go run ./tools/brandgen
+// brandgen 从确认的母版生成 GoShell 的品牌素材与各平台图标。
+// 在项目根目录运行：go run ./tools/brandgen。
 package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -41,176 +42,22 @@ func (p path) svg() string {
 	return b.String()
 }
 
-// GO Terminal 矩形外框：右侧开口向内回折形成 G，整体轮廓形成 O。
-var shell = path{
-	{'M', []float32{44, 29.25}}, {'L', []float32{52.75, 29.25}},
-	{'C', []float32{53.993, 29.25, 55, 30.257, 55, 31.5}},
-	{'L', []float32{55, 41}},
-	{'C', []float32{55, 47.075, 50.075, 52, 44, 52}},
-	{'L', []float32{20, 52}},
-	{'C', []float32{13.925, 52, 9, 47.075, 9, 41}},
-	{'L', []float32{9, 23}},
-	{'C', []float32{9, 16.925, 13.925, 12, 20, 12}},
-	{'L', []float32{44, 12}},
-	{'C', []float32{50.075, 12, 55, 16.925, 55, 23}},
-	{'C', []float32{55, 24.243, 53.993, 25.25, 52.75, 25.25}},
-	{'C', []float32{51.507, 25.25, 50.5, 24.243, 50.5, 23}},
-	{'C', []float32{50.5, 19.406, 47.594, 16.5, 44, 16.5}},
-	{'L', []float32{20, 16.5}},
-	{'C', []float32{16.406, 16.5, 13.5, 19.406, 13.5, 23}},
-	{'L', []float32{13.5, 41}},
-	{'C', []float32{13.5, 44.594, 16.406, 47.5, 20, 47.5}},
-	{'L', []float32{44, 47.5}},
-	{'C', []float32{47.594, 47.5, 50.5, 44.594, 50.5, 41}},
-	{'L', []float32{50.5, 33.75}}, {'L', []float32{44, 33.75}},
-	{'C', []float32{42.757, 33.75, 41.75, 32.743, 41.75, 31.5}},
-	{'C', []float32{41.75, 30.257, 42.757, 29.25, 44, 29.25}}, {'Z', nil},
-}
-
-var promptChevron = path{
-	{'M', []float32{25.802, 21.481}},
-	{'L', []float32{36.302, 30.481}},
-	{'Q', []float32{38.075, 32, 36.302, 33.519}},
-	{'L', []float32{25.802, 42.519}},
-	{'C', []float32{24.963, 43.238, 23.701, 43.14, 22.981, 42.302}},
-	{'C', []float32{22.262, 41.463, 22.364, 40.201, 23.198, 39.481}},
-	{'L', []float32{31.927, 32}}, {'L', []float32{23.198, 24.519}},
-	{'C', []float32{22.364, 23.799, 22.262, 22.537, 22.981, 21.698}},
-	{'C', []float32{23.701, 20.862, 24.963, 20.762, 25.802, 21.481}}, {'Z', nil},
-}
-
-var promptCursor = path{
-	{'M', []float32{37.25, 38}}, {'L', []float32{43.25, 38}},
-	{'C', []float32{44.493, 38, 45.5, 39.007, 45.5, 40.25}},
-	{'C', []float32{45.5, 41.493, 44.493, 42.5, 43.25, 42.5}},
-	{'L', []float32{37.25, 42.5}},
-	{'C', []float32{36.007, 42.5, 35, 41.493, 35, 40.25}},
-	{'C', []float32{35, 39.007, 36.007, 38, 37.25, 38}}, {'Z', nil},
-}
-
-var prompt path
-
-func transformPath(p path, scale, dx, dy float32) path {
-	var result path
-	for _, c := range p {
-		v := append([]float32(nil), c.p...)
-		for i := range v {
-			v[i] *= scale
-			if i%2 == 0 {
-				v[i] += dx
-			} else {
-				v[i] += dy
-			}
-		}
-		result = append(result, command{c.op, v})
-	}
-	return result
-}
-
 func must(err error) {
 	if err != nil {
 		panic(err)
 	}
 }
-func write(name string, data []byte) { must(os.WriteFile(filepath.Join(out, name), data, 0o644)) }
+
+func write(name string, data []byte) {
+	must(os.WriteFile(filepath.Join(out, name), data, 0o644))
+}
+
 func svg(w, h int, content string) []byte {
 	return []byte(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" role="img" aria-label="GoShell"><title>GoShell</title>%s</svg>`+"\n", w, h, w, h, content))
 }
-func shape(p path, fill string) string { return fmt.Sprintf(`<path fill="%s" d="%s"/>`, fill, p.svg()) }
-func mark(main, accent string) string  { return shape(shell, main) + shape(prompt, accent) }
 
-func paint(dst *image.RGBA, p path, fill color.Color, scale, dx, dy float32) {
-	r := vector.NewRasterizer(dst.Bounds().Dx(), dst.Bounds().Dy())
-	for _, c := range p {
-		v := append([]float32(nil), c.p...)
-		for i := range v {
-			v[i] *= scale
-			if i%2 == 0 {
-				v[i] += dx
-			} else {
-				v[i] += dy
-			}
-		}
-		switch c.op {
-		case 'M':
-			r.MoveTo(v[0], v[1])
-		case 'L':
-			r.LineTo(v[0], v[1])
-		case 'Q':
-			r.QuadTo(v[0], v[1], v[2], v[3])
-		case 'C':
-			r.CubeTo(v[0], v[1], v[2], v[3], v[4], v[5])
-		case 'Z':
-			r.ClosePath()
-		}
-	}
-	r.Draw(dst, dst.Bounds(), image.NewUniform(fill), image.Point{})
-}
-
-// rasterizePath 以 4 倍超采样把路径光栅化为覆盖率蒙版（0..1），供带光照的图标渲染使用。
-func rasterizePath(p path, size int, scale, dx, dy float64) []float64 {
-	const supersample = 4
-	r := vector.NewRasterizer(size*supersample, size*supersample)
-	for _, c := range p {
-		v := make([]float64, len(c.p))
-		for i := range c.p {
-			v[i] = float64(c.p[i]) * scale * supersample
-			if i%2 == 0 {
-				v[i] += dx * supersample
-			} else {
-				v[i] += dy * supersample
-			}
-		}
-		switch c.op {
-		case 'M':
-			r.MoveTo(float32(v[0]), float32(v[1]))
-		case 'L':
-			r.LineTo(float32(v[0]), float32(v[1]))
-		case 'Q':
-			r.QuadTo(float32(v[0]), float32(v[1]), float32(v[2]), float32(v[3]))
-		case 'C':
-			r.CubeTo(float32(v[0]), float32(v[1]), float32(v[2]), float32(v[3]), float32(v[4]), float32(v[5]))
-		case 'Z':
-			r.ClosePath()
-		}
-	}
-	super := image.NewAlpha(image.Rect(0, 0, size*supersample, size*supersample))
-	r.Draw(super, super.Bounds(), image.NewUniform(color.Alpha{255}), image.Point{})
-
-	coverage := make([]float64, size*size)
-	total := float64(supersample * supersample)
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			var sum float64
-			for py := 0; py < supersample; py++ {
-				for px := 0; px < supersample; px++ {
-					sum += float64(super.AlphaAt(x*supersample+px, y*supersample+py).A)
-				}
-			}
-			coverage[y*size+x] = sum / total / 255
-		}
-	}
-	return coverage
-}
-
-var (
-	inkHex        = "#0366D6"
-	accentHex     = "#0366D6"
-	pearlHex      = "#FFFFFF"
-	wordHex       = "#111319"
-	darkAccentHex = "#FFFFFF"
-)
-
-var (
-	ink        = color.RGBA{3, 102, 214, 255}
-	accent     = color.RGBA{3, 102, 214, 255}
-	pearl      = color.RGBA{255, 255, 255, 255}
-	wordColor  = color.RGBA{17, 19, 25, 255}
-	darkAccent = color.RGBA{255, 255, 255, 255}
-)
-
-func init() {
-	prompt = append(transformPath(promptChevron, .8, 2, 7), promptCursor...)
+func shape(p path, fill string) string {
+	return fmt.Sprintf(`<path fill="%s" d="%s"/>`, fill, p.svg())
 }
 
 func pngBytes(im image.Image) []byte {
@@ -219,7 +66,13 @@ func pngBytes(im image.Image) []byte {
 	return b.Bytes()
 }
 
-// Outline the bundled Go font so exported wordmarks have no font dependency.
+// bitmapSVG 内嵌 PNG，不依赖外部文件；角色仍以母版为准。
+func bitmapSVG(im image.Image, size int) string {
+	return fmt.Sprintf(`<image width="%d" height="%d" href="data:image/png;base64,%s"/>`,
+		size, size, base64.StdEncoding.EncodeToString(pngBytes(im)))
+}
+
+// wordmark 将随项目分发的 Go Regular 字体转为路径，沿用原有字标排版。
 func wordmark() path {
 	f, err := sfnt.Parse(goregular.TTF)
 	must(err)
@@ -264,9 +117,36 @@ func wordmark() path {
 	return p
 }
 
-func desktopIcons() {
+func paint(dst *image.RGBA, p path, fill color.Color, scale, dx, dy float32) {
+	r := vector.NewRasterizer(dst.Bounds().Dx(), dst.Bounds().Dy())
+	for _, c := range p {
+		v := append([]float32(nil), c.p...)
+		for i := range v {
+			v[i] *= scale
+			if i%2 == 0 {
+				v[i] += dx
+			} else {
+				v[i] += dy
+			}
+		}
+		switch c.op {
+		case 'M':
+			r.MoveTo(v[0], v[1])
+		case 'L':
+			r.LineTo(v[0], v[1])
+		case 'Q':
+			r.QuadTo(v[0], v[1], v[2], v[3])
+		case 'C':
+			r.CubeTo(v[0], v[1], v[2], v[3], v[4], v[5])
+		case 'Z':
+			r.ClosePath()
+		}
+	}
+	r.Draw(dst, dst.Bounds(), image.NewUniform(fill), image.Point{})
+}
+
+func desktopIcons(renderer iconRenderer) {
 	var body bytes.Buffer
-	// macOS 会从 icns 里挑最接近的尺寸，补齐 16/32/48 等小图可避免 Dock、访达缩略图被放大而发虚
 	for _, e := range []struct {
 		tag  string
 		size int
@@ -274,7 +154,7 @@ func desktopIcons() {
 		{"icp4", 16}, {"icp5", 32}, {"ic11", 32}, {"icp6", 64}, {"ic12", 64},
 		{"ic07", 128}, {"ic08", 256}, {"ic09", 512}, {"ic10", 1024},
 	} {
-		data := pngBytes(appIcon(e.size))
+		data := pngBytes(renderer.appIcon(e.size))
 		body.WriteString(e.tag)
 		must(binary.Write(&body, binary.BigEndian, uint32(len(data)+8)))
 		body.Write(data)
@@ -290,7 +170,7 @@ func desktopIcons() {
 	offset := 6 + len(sizes)*16
 	var images [][]byte
 	for _, size := range sizes {
-		data := pngBytes(appIcon(size))
+		data := pngBytes(renderer.appIcon(size))
 		images = append(images, data)
 		dim := byte(size % 256)
 		ico.Write([]byte{dim, dim, 0, 0})
@@ -304,50 +184,51 @@ func desktopIcons() {
 	write("app-icon.ico", ico.Bytes())
 }
 
+// preview 展示深浅底字标与常用尺寸，检查透明留白和小尺寸表现。
+func preview(renderer iconRenderer, words path) *image.RGBA {
+	im := image.NewRGBA(image.Rect(0, 0, 1200, 640))
+	draw.Draw(im, im.Bounds(), image.NewUniform(color.RGBA{250, 250, 248, 255}), image.Point{}, draw.Src)
+	draw.Draw(im, image.Rect(600, 0, 1200, 420), image.NewUniform(color.RGBA{24, 24, 24, 255}), image.Point{}, draw.Src)
+	for _, x := range []int{64, 664} {
+		draw.Draw(im, image.Rect(x, 146, x+128, 274), renderer.appIcon(128), image.Point{}, draw.Over)
+		textColor := color.RGBA{17, 19, 25, 255}
+		if x > 600 {
+			textColor = color.RGBA{255, 255, 255, 255}
+		}
+		paint(im, words, textColor, 2, float32(x), 146)
+	}
+	for i, size := range []int{128, 64, 32, 16} {
+		x := 80 + i*150
+		y := 526 - size/2
+		draw.Draw(im, image.Rect(x, y, x+size, y+size), renderer.appIcon(size), image.Point{}, draw.Over)
+	}
+	return im
+}
+
 func main() {
-	target := flag.String("out", "assets/brand", "Output directory")
+	target := flag.String("out", "assets/brand", "输出目录")
+	source := flag.String("source", "assets/brand/source/d04.png", "方形 PNG 图标母版")
 	flag.Parse()
+	renderer, err := loadArtwork(*source)
+	must(err)
 	out = *target
 	must(os.MkdirAll(out, 0o755))
-	write("logo.svg", svg(64, 64, mark(inkHex, accentHex)))
-	write("logo-dark.svg", svg(64, 64, mark(pearlHex, darkAccentHex)))
-	write("logo-mono.svg", svg(64, 64, mark("currentColor", "currentColor")))
-	write("app-icon.svg", svg(64, 64, iconSVG()))
+	logo := bitmapSVG(renderer.appIcon(256), 64)
+	for _, name := range []string{"logo.svg", "logo-dark.svg", "logo-mono.svg"} {
+		write(name, svg(64, 64, logo))
+	}
+	write("app-icon.svg", svg(1024, 1024, bitmapSVG(renderer.appIcon(1024), 1024)))
 	words := wordmark()
-	write("wordmark.svg", svg(220, 64, mark(inkHex, accentHex)+shape(words, wordHex)))
-	write("wordmark-dark.svg", svg(220, 64, mark(pearlHex, darkAccentHex)+shape(words, pearlHex)))
+	write("wordmark.svg", svg(220, 64, logo+shape(words, "#111319")))
+	write("wordmark-dark.svg", svg(220, 64, logo+shape(words, "#FFFFFF")))
 	for _, size := range []int{16, 32, 64, 128, 256, 512, 1024} {
 		name := fmt.Sprintf("app-icon-%d.png", size)
 		if size == 1024 {
 			name = "app-icon.png"
 		}
-		write(name, pngBytes(appIcon(size)))
+		write(name, pngBytes(renderer.appIcon(size)))
 	}
-	desktopIcons()
-	// A compact preview board, generated from the same geometry as the assets.
-	im := image.NewRGBA(image.Rect(0, 0, 1200, 640))
-	draw.Draw(im, im.Bounds(), image.NewUniform(color.RGBA{250, 250, 248, 255}), image.Point{}, draw.Src)
-	draw.Draw(im, image.Rect(600, 0, 1200, 420), image.NewUniform(ink), image.Point{}, draw.Src)
-	for _, e := range []struct {
-		x            float32
-		main, accent color.Color
-	}{{64, ink, accent}, {664, pearl, darkAccent}} {
-		paint(im, shell, e.main, 2, e.x, 146)
-		paint(im, prompt, e.accent, 2, e.x, 146)
-		textColor := color.Color(wordColor)
-		if e.x > 600 {
-			textColor = pearl
-		}
-		paint(im, words, textColor, 2, e.x, 146)
-	}
-	for i, size := range []int{128, 64, 32, 16} {
-		icon := appIcon(size)
-		x := 80 + i*150
-		y := 526 - size/2
-		draw.Draw(im, image.Rect(x, y, x+size, y+size), icon, image.Point{}, draw.Over)
-	}
-	paint(im, shell, ink, 2, 840, 462)
-	paint(im, prompt, ink, 2, 840, 462)
-	write("preview.png", pngBytes(im))
-	fmt.Println("Generated GoShell brand assets in", out)
+	desktopIcons(renderer)
+	write("preview.png", pngBytes(preview(renderer, words)))
+	fmt.Println("GoShell 品牌素材已生成：", out)
 }

@@ -1,49 +1,40 @@
-# GoShell Logo
+# GoShell 图标
 
-当前应用使用矩形 **GO Terminal** 方案：近乎闭合的矩形外框带出 O 的轮廓，右侧开口向内回折形成 G 的短横，内部保留 `>_` 提示符。配色与 UI 一致，已接入应用侧边栏及系统图标。
+当前使用确认过的 **D04「提示符眼神」**：黑底白色小幽灵从底部冒头，左眼为 `>`，右眼为竖线光标。系统图标、侧边栏、关于页和项目字标使用同一母版。
+
+## 原图与备选
 
 | 文件 | 用途 |
 | --- | --- |
-| `logo.svg` | 浅色背景上的蓝色 GO Terminal 标志，已接入侧边栏 |
-| `logo-dark.svg` | 深色背景上的白色标志 |
-| `logo-mono.svg` | 单色标志，通过 `currentColor` 继承颜色 |
-| `wordmark.svg` / `wordmark-dark.svg` | 浅色 / 深色背景横版字标，文字已转路径 |
-| `app-icon.svg` / `app-icon.png` | 应用图标：超椭圆主体 + 纵向渐变 + 边缘高光 + 外投影，PNG 为 1024 × 1024 |
-| `app-icon-{16,32,64,128,256,512}.png` | 常用尺寸图标 |
-| `app-icon.icns` / `app-icon.ico` | macOS / Windows 图标文件 |
-| `preview.png` | 深浅底、应用图标和单色版本预览 |
+| `source/d04.png` | 当前 D04 原始母版，保持原图不变 |
+| `source/r1d.png` | 保留的 R1D「低处冒头」原始版本，不参与默认生成 |
+| `app-icon.png` | 1024 × 1024 应用图标，嵌入程序并用于 MyGo 打包 |
+| `app-icon-{16,32,64,128,256,512}.png` | 常用尺寸 |
+| `app-icon.icns` / `app-icon.ico` | macOS / Windows 平台图标 |
+| `app-icon.svg` | 内嵌同款 PNG 的 SVG，不是重新描摹的矢量 |
+| `logo.svg` / `logo-dark.svg` / `logo-mono.svg` | 保留原有文件名的同款黑白标识，内嵌 PNG，颜色固定 |
+| `wordmark.svg` / `wordmark-dark.svg` | 图标与 GoShell 字标，字体继续使用转为路径的 Go Regular |
+| `preview.png` | 深浅底字标与常用尺寸预览 |
 
-## 应用图标的画布与光照
+## 生成方式
 
-应用图标按 Apple 官方模板比例绘制，这样在 macOS 26（Tahoe）及之后的系统上不会被二次缩放而显得比同级图标小一圈：
-
-- 画布 1024 × 1024，主体 824 × 824（`824/1024 ≈ 80.5%`），四边各留 100 px。
-- 主体为超椭圆（指数 5），近似 Apple 的连续曲率圆角，替代旧的圆角矩形。
-- 主体纵向渐变：顶部 `#1C74DE` → 中部品牌蓝 `#0366D6` → 底部 `#0150B8`，中间色仍与 UI 主色一致。
-- 边缘高光：上边缘最亮，沿法线向内按指数衰减（宽度约主体 2%），下边缘有贴边反光与内侧压暗，形成厚度感。
-- 外投影：向下偏移的柔和暗部。Dock 不会为图标额外加投影，投影必须画在图标自身；macOS 26 起系统还会剥掉旧格式图标自带的投影。
-- 生成器同时导出 `.icns` 的 16/32/48/128/256/512/1024 全套条目，避免小尺寸被放大而发虚。
-
-以上比例、边缘光与投影均有单元测试锁定（`tools/brandgen/icon_test.go`），调整参数后请运行 `go test ./tools/brandgen/`。
-
-## 配色与留白
-
-- 品牌蓝：`#0366D6`，与 UI 主色一致，用于浅底标志与应用图标主色。
-- 正文色：`#111319`，用于浅底字标。
-- 白色：`#FFFFFF`，用于深底标志与字标。
-- 图形 SVG 为 64 × 64 画布，保留内置留白；外侧建议至少留出 8 个画布单位。最小显示尺寸为 16 px，工具栏建议 24–32 px。
-- 横版字标使用较轻的 Go Regular，随 `golang.org/x/image/font/gofont` 提供，已转为路径，不依赖使用者安装字体。
-
-字标字体的授权声明见 `FONT-LICENSE.txt`，分发字标素材时请保留该声明。
-
-## 重新生成
-
-在项目根目录运行：
+在项目根目录执行：
 
 ```sh
 go run ./tools/brandgen
+go test ./tools/brandgen
 ```
 
-默认生成已选定的 GO Terminal 方案，写入本目录。生成器共用一套路径定义，直接导出 SVG、PNG、ICO、ICNS 和预览，不需要额外图形软件。应用图标的几何与光照参数集中在 `tools/brandgen/icon.go`，标志与字标在 `tools/brandgen/main.go`，调整后运行以上命令即可。
+生成器仅对确认的 PNG 母版进行缩放与平台封装，不重新绘制角色或表情。桌面图标保留现有的超椭圆外形和主体占比：1024 画布内主体为 824 × 824，四边透明留白各 100 px。小幽灵在母版中的低处冒头构图保持不变。
 
-应用在运行时从嵌入资源设置 Dock 或窗口图标；`mygo.json` 的 `icon` 指向同一份 PNG，MyGo 打包时会将图标写入平台应用包。
+需要预览保留的 R1D 时，可以单独输出到其他目录，不覆盖当前图标：
+
+```sh
+go run ./tools/brandgen -source assets/brand/source/r1d.png -out bin/brand-r1d
+```
+
+SVG 使用内嵌 PNG，查看器需要支持 SVG 的 `image` 元素。MyGo 的 SVG 解析器不支持内嵌位图，因此应用界面直接解码共享的 `brand.IconPNG`，与 Dock、窗口图标保持一致。
+
+`mygo.json`、Windows 资源生成和发布工作流继续使用本目录的既有文件路径。R1D 原图不会被重新生成命令覆盖。
+
+字标字体的授权说明保留于 `FONT-LICENSE.txt`，分发字标时请保留该文件。

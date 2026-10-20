@@ -1,110 +1,165 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
 	"image"
+	"image/color"
+	"image/png"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-// 图标在 macOS 上显得单薄，核心是画布比例、边缘光和投影三项。
-// 这组测试把这三项固定下来，避免后续调整几何时悄悄退化。
-func TestIconBodyRatioMatchesAppleTemplate(t *testing.T) {
-	// Apple 模板：1024 画布中主体 824，即 80.5%
-	if math.Abs(iconBodyRatio-824.0/1024.0) > 1e-9 {
-		t.Fatalf("主体占比应为 824/1024，当前 %v", iconBodyRatio)
+const brandDir = "../../assets/brand"
+
+func approvedArtwork(t *testing.T) iconRenderer {
+	t.Helper()
+	renderer, err := loadArtwork(filepath.Join(brandDir, "source/d04.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return renderer
+}
+
+// 两份确认的原图应原样保存，重新生成时也不能覆盖 R1D 备选。
+func TestApprovedSourcesArePreserved(t *testing.T) {
+	for name, want := range map[string]string{
+		"d04.png": "e33e58454e599791a2243a7d3aaedfb4463e7d0270100889702fd7b320b61c06",
+		"r1d.png": "e50d359c3446dc16b18ed84c549b43af1a63101a8efe468e0cbbf2f781203063",
+	} {
+		data, err := os.ReadFile(filepath.Join(brandDir, "source", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != want {
+			t.Errorf("%s 原图发生变化：%s", name, got)
+		}
 	}
 }
 
-// 主体上下应分别达到模板画布的 100px 留白，左右同理。
 func TestIconLeavesTemplateMargin(t *testing.T) {
 	const size = 1024
-	im := appIcon(size)
-	// 主体之外的四角必须完全透明（留白）
-	corners := []image.Point{{0, 0}, {size - 1, 0}, {0, size - 1}, {size - 1, size - 1}}
-	for _, p := range corners {
-		if _, _, _, a := im.At(p.X, p.Y).RGBA(); a != 0 {
-			t.Errorf("角点 %v 应透明，实际 alpha=%d", p, a>>8)
+	if math.Abs(iconBodyRatio-824.0/1024.0) > 1e-9 {
+		t.Fatal("桌面图标主体应保持 824/1024 的占比")
+	}
+	im := approvedArtwork(t).appIcon(size)
+	for _, p := range []image.Point{{0, 0}, {size - 1, 0}, {0, size - 1}, {size - 1, size - 1}, {512, 99}, {99, 512}, {924, 512}} {
+		if a := im.RGBAAt(p.X, p.Y).A; a != 0 {
+			t.Errorf("留白位置 %v 应透明，实际 alpha=%d", p, a)
 		}
 	}
-	// 主体应落在 100px 留白之内：100 像素处的中线必须是实体
-	if _, _, _, a := im.At(size/2, 100).RGBA(); a>>8 < 250 {
-		t.Errorf("主体上边界应到达 y=100，实际 alpha=%d", a>>8)
-	}
-	// 主体上边缘在 y=100；主体之外只允许有很淡的外投影，不应出现实心主体
-	if _, _, _, a := im.At(size/2, 98).RGBA(); a>>8 > 32 {
-		t.Errorf("第 98 行应基本在主体之外（仅允许淡投影），实际 alpha=%d", a>>8)
+	if a := im.RGBAAt(512, 100).A; a != 255 {
+		t.Errorf("主体上边界应到达 y=100，实际 alpha=%d", a)
 	}
 }
 
-// 顶部边缘必须比主体中部更亮（高光），这是立体感的来源。
-func TestIconTopEdgeIsHighlighted(t *testing.T) {
-	size := 512
-	im := appIcon(size)
-	half := int(float64(size) * iconBodyRatio / 2)
-	top := size/2 - half + 1 // 紧贴主体上边缘
-	mid := size / 2          // 主体中部
-
-	r, g, b, _ := im.At(top, size/2).RGBA()
-	topLuma := float64(r>>8)*0.299 + float64(g>>8)*0.587 + float64(b>>8)*0.114
-
-	r, g, b, _ = im.At(mid, size/2).RGBA()
-	midLuma := float64(r>>8)*0.299 + float64(g>>8)*0.587 + float64(b>>8)*0.114
-
-	if topLuma <= midLuma {
-		t.Fatalf("顶部边缘应比中部更亮：顶部亮度 %.1f，中部亮度 %.1f", topLuma, midLuma)
-	}
-}
-
-// 主体外下方应有柔和投影，否则图标在深色背景上会"贴平"。
-func TestIconHasDropShadowBelow(t *testing.T) {
-	size := 512
-	im := appIcon(size)
-	half := int(float64(size) * iconBodyRatio / 2)
-	bottom := size/2 + half + 2 // 紧贴主体下边缘外侧
-
-	_, _, _, a := im.At(bottom, size/2).RGBA()
-	if a>>8 == 0 {
-		t.Fatal("主体下方应有投影，实际完全透明")
-	}
-	// 投影必须是半透明暗色，不能是实心块
-	if a>>8 > 200 {
-		t.Fatalf("投影不应为不透明，实际 alpha=%d", a>>8)
-	}
-	// 投影是向下偏移的：下方 shadow 区域的暗度应明显强于上方同距离处
-	topOutside := size/2 - half - 6
-	_, _, _, ta := im.At(size/2, topOutside).RGBA()
-	_, _, _, ba := im.At(size/2, bottom+4).RGBA()
-	if ta>>8 >= ba>>8 {
-		t.Fatalf("投影应偏向下方：上方 alpha=%d，下方 alpha=%d", ta>>8, ba>>8)
-	}
-}
-
-// 白色标记必须比主体底色更亮，确保标识清晰可辨。
-func TestIconMarkContrast(t *testing.T) {
-	const size = 512
-	im := appIcon(size)
-	// 取外框左侧竖线段的中点
-	inset := (1 - iconBodyRatio) / 2
-	x := int(float64(size) * (4 + 9*inset) / 64)
-	r, g, b, a := im.At(x, size/2).RGBA()
-	if a>>8 == 0 {
-		return // 该点可能落在图形空隙，测试不做强约束
-	}
-	if r>>8 < 200 || g>>8 < 200 || b>>8 < 200 {
-		t.Fatalf("标记应为近白色，实际 rgb=(%d,%d,%d)", r>>8, g>>8, b>>8)
-	}
-}
-
-// 各尺寸都要能渲染且不 panic，小尺寸也要有非空内容。
-func TestIconRendersAllSizes(t *testing.T) {
-	for _, size := range []int{16, 32, 48, 64, 128, 256, 512, 1024} {
-		im := appIcon(size)
-		if got := im.Bounds().Dx(); got != size {
-			t.Fatalf("尺寸 %d 渲染结果宽度为 %d", size, got)
+// 检查母版内部的颜色和表情未被重绘，包含背景、幽灵和提示符的采样。
+func TestIconKeepsApprovedArtwork(t *testing.T) {
+	renderer := approvedArtwork(t)
+	const size = 1024
+	im := renderer.appIcon(size)
+	for _, p := range []image.Point{{400, 200}, {300, 1000}, {700, 750}, {870, 800}} {
+		bounds := renderer.master.Bounds()
+		x := 100 + (p.X*bounds.Dx()/1254)*824/bounds.Dx()
+		y := 100 + (p.Y*bounds.Dy()/1254)*824/bounds.Dy()
+		want := color.RGBAModel.Convert(renderer.master.At(p.X*bounds.Dx()/1254, p.Y*bounds.Dy()/1254)).(color.RGBA)
+		got := im.RGBAAt(x, y)
+		for i, pair := range [][2]uint8{{got.R, want.R}, {got.G, want.G}, {got.B, want.B}, {got.A, want.A}} {
+			if math.Abs(float64(pair[0])-float64(pair[1])) > 16 {
+				t.Errorf("母版位置 %v 通道 %d 发生变化：实际 %d，预期 %d", p, i, pair[0], pair[1])
+			}
 		}
-		// 中心必须是不透明的主体
-		if _, _, _, a := im.At(size/2, size/2).RGBA(); a>>8 < 250 {
-			t.Errorf("尺寸 %d 的中心应为不透明主体，实际 alpha=%d", size, a>>8)
+	}
+}
+
+// 校验真实分发文件，避免重新生成命令遗漏某个平台或某个尺寸。
+func TestGeneratedIconsUseD04(t *testing.T) {
+	renderer := approvedArtwork(t)
+	expected := make(map[int][]byte)
+	check := func(data []byte, size int) {
+		t.Helper()
+		im, err := png.Decode(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
 		}
+		if im.Bounds().Size() != image.Pt(size, size) {
+			t.Fatalf("图标尺寸错误：预期 %d，实际 %v", size, im.Bounds().Size())
+		}
+		if expected[size] == nil {
+			expected[size] = pngBytes(renderer.appIcon(size))
+		}
+		if !bytes.Equal(data, expected[size]) {
+			t.Errorf("%d 像素图标与 D04 母版的生成结果不一致", size)
+		}
+	}
+	read := func(name string) []byte {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(brandDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	for _, size := range []int{16, 32, 64, 128, 256, 512, 1024} {
+		name := fmt.Sprintf("app-icon-%d.png", size)
+		if size == 1024 {
+			name = "app-icon.png"
+		}
+		check(read(name), size)
+	}
+
+	ico := read("app-icon.ico")
+	sizes := []int{16, 24, 32, 48, 64, 128, 256}
+	if len(ico) < 6+len(sizes)*16 || binary.LittleEndian.Uint16(ico[2:4]) != 1 || int(binary.LittleEndian.Uint16(ico[4:6])) != len(sizes) {
+		t.Fatal("ICO 文件头或图标条目数量错误")
+	}
+	for i, size := range sizes {
+		entry := ico[6+i*16 : 6+(i+1)*16]
+		length := int(binary.LittleEndian.Uint32(entry[8:12]))
+		offset := int(binary.LittleEndian.Uint32(entry[12:16]))
+		if offset < 6+len(sizes)*16 || length <= 0 || offset > len(ico)-length {
+			t.Fatal("ICO 图像条目越界")
+		}
+		check(ico[offset:offset+length], size)
+	}
+
+	icns := read("app-icon.icns")
+	if len(icns) < 8 || string(icns[:4]) != "icns" || int(binary.BigEndian.Uint32(icns[4:8])) != len(icns) {
+		t.Fatal("ICNS 文件头或长度错误")
+	}
+	tags := map[string]int{"icp4": 16, "icp5": 32, "ic11": 32, "icp6": 64, "ic12": 64, "ic07": 128, "ic08": 256, "ic09": 512, "ic10": 1024}
+	for offset := 8; offset < len(icns); {
+		if offset+8 > len(icns) {
+			t.Fatal("ICNS 条目头越界")
+		}
+		tag := string(icns[offset : offset+4])
+		length := int(binary.BigEndian.Uint32(icns[offset+4 : offset+8]))
+		size, ok := tags[tag]
+		if !ok || length <= 8 || offset > len(icns)-length {
+			t.Fatal("ICNS 条目无效或越界")
+		}
+		check(icns[offset+8:offset+length], size)
+		delete(tags, tag)
+		offset += length
+	}
+	if len(tags) != 0 {
+		t.Errorf("ICNS 缺少尺寸条目：%v", tags)
+	}
+}
+
+func TestLoadArtworkRejectsInvalidSource(t *testing.T) {
+	if _, err := loadArtwork(filepath.Join(t.TempDir(), "missing.png")); err == nil {
+		t.Fatal("缺失母版时应报错")
+	}
+	name := filepath.Join(t.TempDir(), "not-square.png")
+	if err := os.WriteFile(name, pngBytes(image.NewRGBA(image.Rect(0, 0, 8, 4))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadArtwork(name); err == nil {
+		t.Fatal("非方形母版应报错")
 	}
 }
