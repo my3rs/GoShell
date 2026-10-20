@@ -251,8 +251,7 @@ func TestHostDropAnimatesRows(t *testing.T) {
 	// 随后若干帧推进时间：位移补间持续进行，并最终落位到目标行下方。
 	moved := false
 	for i := 0; i < 40; i++ {
-		time.Sleep(15 * time.Millisecond)
-		tt.Frame()
+		tt.Advance(20 * time.Millisecond)
 		if y := hostNameRect(t, tt, "主机-1").Y; y > source.Y+2 {
 			moved = true
 		}

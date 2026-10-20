@@ -884,7 +884,7 @@ func TestAppView_HoverBackgroundConsistency(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	// 1. 验证左侧栏未选中的主机卡片 (Host-2) 悬浮时背景色精确为 ColSidebarHover (RGB 223, 229, 236)
+	// 1. 验证左侧栏未选中的主机卡片悬浮时使用中性灰。
 	rectHost2, okHost2 := tt.Find("Host-2")
 	if !okHost2 {
 		t.Fatalf("Expected to find Host-2 in sidebar")
@@ -896,8 +896,8 @@ func TestAppView_HoverBackgroundConsistency(t *testing.T) {
 	imgHost := tt.Image()
 	colHost := imgHost.At(int(hoverX), int(hoverY))
 	rHost, gHost, bHost, _ := colHost.RGBA()
-	if uint8(rHost>>8) != 223 || uint8(gHost>>8) != 229 || uint8(bHost>>8) != 236 {
-		t.Errorf("Expected Host-2 hovered color RGB(223, 229, 236), got RGB(%d, %d, %d)", uint8(rHost>>8), uint8(gHost>>8), uint8(bHost>>8))
+	if uint8(rHost>>8) != 228 || uint8(gHost>>8) != 228 || uint8(bHost>>8) != 231 {
+		t.Errorf("主机悬浮色应为 RGB(228, 228, 231)，实际 RGB(%d, %d, %d)", uint8(rHost>>8), uint8(gHost>>8), uint8(bHost>>8))
 	}
 
 	// 2. 验证右侧工作区未激活的标签页 (Tab 2) 悬浮响应与底色加深
@@ -913,7 +913,7 @@ func TestAppView_HoverBackgroundConsistency(t *testing.T) {
 		t.Errorf("Expected Tab 2 to change background on hover, but unhovered (%+v) == hovered (%+v)", colTabUnhover, colTabHover)
 	}
 
-	// 3. 验证左侧栏远程文件列表项悬浮时背景色精确为 ColSidebarHover (RGB 223, 229, 236)
+	// 3. 验证远程文件列表项悬浮时使用相同的中性灰。
 	sess := v.tabs[1].Session
 	sess.FileList = []sftpService.FileEntry{
 		{Name: "app.log", Path: "/app.log", IsDir: false},
@@ -933,8 +933,8 @@ func TestAppView_HoverBackgroundConsistency(t *testing.T) {
 	imgFile := tt.Image()
 	colFile := imgFile.At(int(fileHoverX), int(fileHoverY))
 	rFile, gFile, bFile, _ := colFile.RGBA()
-	if uint8(rFile>>8) != 223 || uint8(gFile>>8) != 229 || uint8(bFile>>8) != 236 {
-		t.Errorf("Expected file item hovered color RGB(223, 229, 236), got RGB(%d, %d, %d)", uint8(rFile>>8), uint8(gFile>>8), uint8(bFile>>8))
+	if uint8(rFile>>8) != 228 || uint8(gFile>>8) != 228 || uint8(bFile>>8) != 231 {
+		t.Errorf("文件悬浮色应为 RGB(228, 228, 231)，实际 RGB(%d, %d, %d)", uint8(rFile>>8), uint8(gFile>>8), uint8(bFile>>8))
 	}
 }
 
@@ -1125,7 +1125,7 @@ func TestAppView_SidebarNoPersistentActiveAndDashboardCards(t *testing.T) {
 	tt.Click("测试节点-1")
 	tt.Frame()
 
-	// 3. 验证启动台最近连接项在纯白底色下悬停背景色精确为 t.SurfaceHover (RGB 239, 242, 245)，实现与边栏感知一致的细腻微加深
+	// 3. 验证启动台最近连接项在纯白底色下使用中性浅灰悬停反馈。
 	// 折叠侧边栏以精确定位右侧工作区启动台内的最近连接项
 	v.sidebarCollapsed = true
 	tt.Frame()
@@ -1137,8 +1137,8 @@ func TestAppView_SidebarNoPersistentActiveAndDashboardCards(t *testing.T) {
 		img := tt.Image()
 		col := img.At(int(rectLaunchNode.X+10), int(rectLaunchNode.Y+2))
 		r, g, b, _ := col.RGBA()
-		if uint8(r>>8) != 239 || uint8(g>>8) != 242 || uint8(b>>8) != 245 {
-			t.Errorf("Expected launchpad recent item hovered RGB(239, 242, 245), got RGB(%d, %d, %d)", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+		if uint8(r>>8) != 244 || uint8(g>>8) != 244 || uint8(b>>8) != 245 {
+			t.Errorf("最近连接悬浮色应为 RGB(244, 244, 245)，实际 RGB(%d, %d, %d)", uint8(r>>8), uint8(g>>8), uint8(b>>8))
 		}
 	} else {
 		t.Errorf("Expected to find 测试节点-1 in launchpad after collapsing sidebar")
@@ -1417,6 +1417,3 @@ func TestAppView_SidebarHostList_RenderGripAndSearch(t *testing.T) {
 		t.Fatalf("Expected to find '未找到匹配主机' when filter has no match")
 	}
 }
-
-
-

@@ -179,14 +179,15 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 		}
 		topBar.Children(func() {
 			// 文件图标
-			ui.Icon(c, IconFile).TextColor(t.Accent).Width(14).Height(14)
+			ui.Icon(c, IconFile).TextColor(t.Text).Width(14).Height(14)
 
 			// 文件名
 			ui.Text(c, ef.Name).FontSize(13).Bold().TextColor(t.Text)
 
 			// 主机名标识胶囊
-			ui.Row(c).Background(ColBadgeBlueBg).Padding(1, 6).Radius(t.Radius).Children(func() {
-				ui.Text(c, ef.Session.Host.Name).FontSize(10.5).Bold().TextColor(t.Accent)
+			hostColor := ef.Session.HostColor()
+			ui.Row(c).Background(hostColor.Bg).Padding(1, 6).Radius(t.Radius).Children(func() {
+				ui.Text(c, ef.Session.Host.Name).FontSize(10.5).Bold().TextColor(hostColor.Accent)
 			})
 
 			// 完整远程绝对路径
@@ -205,7 +206,6 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 				})
 			}
 
-
 			ui.Spacer(c)
 
 			// 动态提示文本
@@ -223,7 +223,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 			}
 
 			// 保存按钮 (针对 macOS 和 Windows 显示对应快捷键提示)
-			if ui.PrimaryButton(c, SaveButtonLabel()).Tooltip("保存 (" + SaveShortcutText() + ")").Clicked() {
+			if primaryButton(c, SaveButtonLabel()).Tooltip("保存 (" + SaveShortcutText() + ")").Clicked() {
 				ef.Save()
 			}
 		})
@@ -231,7 +231,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 		// 2. 主体编辑内容区域
 		if ef.Loading {
 			ui.Column(c).Grow(1).Center().Gap(t.Space(2)).Children(func() {
-				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Accent)
+				ui.Box(c).Width(8).Height(8).Radius(4).Background(t.Text)
 				ui.Text(c, fmt.Sprintf("正在读取文件: %s ...", ef.Path)).FontSize(13).Bold().TextColor(t.Text)
 			})
 		} else if ef.LoadErr != "" {
@@ -239,7 +239,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 				ui.Box(c).Width(10).Height(10).Radius(5).Background(t.Danger)
 				ui.Text(c, "读取文件失败").FontSize(15).Bold().TextColor(t.Danger)
 				ui.Text(c, ef.LoadErr).FontSize(12).TextColor(t.TextMuted)
-				if ui.PrimaryButton(c, "重新加载").Clicked() {
+				if primaryButton(c, "重新加载").Clicked() {
 					ef.Reload()
 				}
 			})
@@ -249,7 +249,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 				ui.Text(c, "该文件为二进制格式，不支持在线代码就地编辑").FontSize(15).Bold().TextColor(t.Text)
 				ui.Text(c, "在线编辑器专为 Shell 脚本、配置文件、Python、Go、JSON、YAML、SQL 等文本文件设计。").FontSize(12).TextColor(t.TextMuted)
 				if ef.Session != nil && ef.Session.ShouldShowTransferQueue() {
-					if ui.PrimaryButton(c, "下载到本地 (~/Downloads)").Clicked() {
+					if primaryButton(c, "下载到本地 (~/Downloads)").Clicked() {
 						ef.Session.DownloadEntry(sftpService.FileEntry{
 							Name: ef.Name,
 							Path: ef.Path,
@@ -282,7 +282,7 @@ func (ef *EditorFile) Render(c *ui.Context, t *ui.Theme, onFocus func()) {
 				ui.Text(c, fmt.Sprintf("大小: %s", sftpService.FormatSize(int64(ef.Buffer.Len()), false))).FontSize(10.5).TextColor(t.TextMuted)
 			}
 			ui.Spacer(c)
-			ui.Text(c, "语法: "+ef.Language).FontSize(10.5).Bold().TextColor(t.Accent)
+			ui.Text(c, "语法: "+ef.Language).FontSize(10.5).Bold().TextColor(t.TextMuted)
 		})
 	})
 }
@@ -309,4 +309,3 @@ func SaveButtonLabel() string {
 func SaveButtonLabelForOS(goos string) string {
 	return fmt.Sprintf("保存 (%s)", SaveShortcutTextForOS(goos))
 }
-

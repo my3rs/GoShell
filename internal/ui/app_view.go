@@ -52,7 +52,7 @@ type hostDragPayload struct {
 	Generation uint64
 }
 
-// AppView 管理桌面主窗口 UI 状态与事件循环，深度复刻 docker-mate 设计规范
+// AppView 管理桌面主窗口 UI 状态与事件循环。
 type AppView struct {
 	app *app.App
 
@@ -134,7 +134,7 @@ func NewAppView(application *app.App) *AppView {
 	spring := ui.Snappy
 	v := &AppView{
 		app:             application,
-		theme:           DockerMateTheme(),
+		theme:           GoShellLightTheme(),
 		sidebarWidth:    240, // 紧凑侧边栏宽度
 		sidebarTab:      0,   // 默认展示主机节点
 		localIP:         getLocalIP(),
@@ -178,7 +178,7 @@ func (v *AppView) View(c *ui.Context) {
 		v.renderStatusBar(c, t)
 	})
 
-	// 3. 对话框弹窗（新建/编辑配置，复刻 docker-mate 的 Dialog）
+	// 3. 对话框弹窗（新建/编辑配置）
 	if v.modalOpen {
 		v.renderHostModal(c, t)
 	}
@@ -208,14 +208,14 @@ func (v *AppView) ToggleSidebar() {
 	}
 }
 
-// 左侧边栏 (复刻 docker-mate 的 app-sidebar 风格，采用 hsl(212, 31%, 95%) 底色)
+// 左侧边栏使用中性浅灰底色。
 func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Fill().Background(ColSidebarBg).Padding(t.Space(2)).Gap(t.Space(2)).Children(func() {
 		// 1. 紧凑边栏头部：品牌标识与操作图标组 (高度 28px)
 		ui.Row(c).Height(28).Padding(0, t.Space(1)).AlignItems(ui.Center).Children(func() {
 			brandRow := ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Padding(2, 4).Radius(t.Radius - 2).Tooltip("关于 GoShell")
 			if brandRow.Hovered() {
-				brandRow.Background(ui.Hex("#E2E8F0"))
+				brandRow.Background(ColSidebarHover)
 			}
 			brandRow.Children(func() {
 				ui.Image(c, goShellLogo).Size(24, 24)
@@ -233,7 +233,7 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 				btnAdd := ui.ButtonBase(c).Tooltip("添加 SSH 主机").Width(24).Height(24).Radius(t.Radius - 2).Center()
 				addIconCol := ColSidebarText
 				if btnAdd.Hovered() {
-					btnAdd.Background(ui.Hex("#E2E8F0"))
+					btnAdd.Background(ColSidebarHover)
 					addIconCol = t.Text
 				}
 				btnAdd.Children(func() {
@@ -247,7 +247,7 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 				btnCollapse := ui.ButtonBase(c).Tooltip("折叠侧边栏 (Cmd+B)").Width(24).Height(24).Radius(t.Radius - 2).Center()
 				collapseIconCol := ColSidebarText
 				if btnCollapse.Hovered() {
-					btnCollapse.Background(ui.Hex("#E2E8F0"))
+					btnCollapse.Background(ColSidebarHover)
 					collapseIconCol = t.Text
 				}
 				btnCollapse.Children(func() {
@@ -260,7 +260,7 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 		})
 
 		// 2. 双 Tab 切换控制器 (Segmented Tab Bar，带平滑滑动高亮胶囊动画)
-		segTrack := ui.Row(c).Key("sidebar_tab_segmented").Height(28).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center)
+		segTrack := ui.Row(c).Key("sidebar_tab_segmented").Height(28).Background(t.SurfacePressed).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center)
 
 		// 补间动画插值：0 (主机列表) 到 1 (远程文件)
 		animPos := segTrack.AnimateWith("sidebar_tab_pos", float32(v.sidebarTab), 180*time.Millisecond, ui.EaseOut)
@@ -429,7 +429,7 @@ func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, "暂无活跃终端连接").FontSize(13).Bold().TextColor(t.TextMuted).TextAlign(ui.Center)
 				ui.Text(c, "请在主机列表中连接服务器以浏览文件。").FontSize(11).TextColor(t.TextMuted).TextAlign(ui.Center)
 			})
-			if ui.PrimaryButton(c, "前往主机列表").Clicked() {
+			if primaryButton(c, "前往主机列表").Clicked() {
 				v.sidebarTab = 0
 			}
 		})
@@ -471,7 +471,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) bool 
 			isDraggingCurrent = row.Dragging()
 		}
 		if isDraggingCurrent {
-			row.Background(ui.Hex("#E0F2FE")).Opacity(0.65)
+			row.Background(ColBadgeBlueBg).Opacity(0.65)
 		} else if isHovered {
 			row.Background(ColSidebarHover)
 		}
@@ -535,7 +535,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) bool 
 				}
 				// 本地终端固定置顶且不可拖拽，用常驻图钉占据右侧手柄位，说明该行为何没有拖拽手柄。
 				if isLocal {
-					ui.Icon(c, IconPin).Width(12).Height(12).TextColor(ui.Hex("#0369A1")).Tooltip("已置顶，不可拖拽排序").Label("置顶")
+					ui.Icon(c, IconPin).Width(12).Height(12).TextColor(t.TextMuted).Tooltip("已置顶，不可拖拽排序").Label("置顶")
 				} else if isHovered && !v.hostDragActive && !isDraggingCurrent && !isSearching {
 					ui.Icon(c, IconGripVertical).Width(12).Height(12).TextColor(t.TextMuted)
 				}
@@ -561,7 +561,7 @@ func (v *AppView) renderHostRow(c *ui.Context, t *ui.Theme, h *model.Host) bool 
 							if position > 0 {
 								y += r.H - 2
 							}
-							p.Fill(ui.Rect{X: r.X + 4, Y: y, W: max(0, r.W-8), H: 2}, ui.Hex("#0284C7"), 1)
+							p.Fill(ui.Rect{X: r.X + 4, Y: y, W: max(0, r.W-8), H: 2}, ColInteraction, 1)
 						})
 					}
 				}
@@ -587,9 +587,9 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 	}
 
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
-		// 顶部多标签栏 (下方开放无缝衔接工作区，依靠底色自然区分)
+		// 顶部标签栏使用独立灰色轨道，白底边框标记当前标签。
 		tabToClose := -1
-		tabBar := ui.Row(c).Key("workspace_tab_bar").Height(36).Background(ColSidebarBg).Padding(0, 8, 0, 8).AlignItems(ui.Center).Gap(4)
+		tabBar := ui.Row(c).Key("workspace_tab_bar").Height(36).Background(ColTabBarBg).Padding(0, 8, 0, 8).AlignItems(ui.Center).Gap(4)
 
 		// 检测标签页标题或数量是否改变（如重命名、动态终端标题更新等）
 		// 在 Immediate Mode UI 下，LayoutBounds() 反映的是上一帧布局；若标题发生变动，须主动请求下一帧刷新
@@ -612,11 +612,11 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 
 		var targetRect ui.Rect
 		foundActive := false
-		type tiledTabBg struct {
+		type tabBackground struct {
 			rect  ui.Rect
 			color ui.Color
 		}
-		var tiledBgs []tiledTabBg
+		var tabBackgrounds []tabBackground
 
 		tabBar.Children(func() {
 			// 侧边栏折叠时，在 Tab 栏最左侧展示展开侧边栏按钮与分隔符 (高度与各 Tab 严格水平居中对齐)
@@ -624,7 +624,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 				btnExpand := ui.ButtonBase(c).Tooltip("展开侧边栏 (Cmd+B)").Width(26).Height(26).Radius(t.Radius - 2).Center()
 				expandIconCol := t.TextMuted
 				if btnExpand.Hovered() {
-					btnExpand.Background(ui.Hex("#DFE5EC"))
+					btnExpand.Background(ColSidebarHover)
 					expandIconCol = t.Text
 				}
 				btnExpand.Children(func() {
@@ -634,7 +634,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					v.ToggleSidebar()
 				}
 
-				ui.Box(c).Width(1).Height(14).Background(ui.Hex("#CBD5E1")).Margin(0, 2, 0, 2)
+				ui.Box(c).Width(1).Height(14).Background(t.Border).Margin(0, 2, 0, 2)
 			}
 
 			for i := range v.tabs {
@@ -674,7 +674,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 					}
 				}
 
-				// Tab 卡片：保持卡片背景透明，平铺底色统一在底层 tabBar.Draw 中渲染，
+				// 标签卡片保持透明，底色统一在底层 tabBar.Draw 中渲染，
 				// 避免子元素不透明背景在滑动切换瞬间遮挡滑块圆角
 				cardBg := ui.Transparent
 				if isFocused && !v.tabPillReady {
@@ -695,19 +695,18 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 						targetRect = bounds
 						foundActive = true
 					}
-				} else if isTiled {
+				} else {
 					bounds := tabCard.LayoutBounds()
 					if bounds.W > 0 {
-						bgCol := ui.Hex("#F1F5F9") // 平铺态默认淡灰底色
-						if tabCard.Hovered() {
-							bgCol = ui.Hex("#DFE5EC") // 平铺态鼠标悬停时高亮反馈
+						bgCol := ColTabInactiveBg
+						if isTiled {
+							bgCol = ColSurfaceSubtle
 						}
-						tiledBgs = append(tiledBgs, tiledTabBg{rect: bounds, color: bgCol})
+						if tabCard.Hovered() {
+							bgCol = ColTabHover
+						}
+						tabBackgrounds = append(tabBackgrounds, tabBackground{rect: bounds, color: bgCol})
 					}
-				}
-
-				if !isFocused && !isTiled && tabCard.Hovered() {
-					tabCard.Background(ui.Hex("#DFE5EC"))
 				}
 
 				if tip != "" {
@@ -734,7 +733,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			// 新建标签快捷按钮 (+)
 			btnNew := ui.Row(c).Width(26).Height(26).Radius(t.Radius - 2).Center()
 			if btnNew.Hovered() {
-				btnNew.Background(ui.Hex("#DFE5EC"))
+				btnNew.Background(ColSidebarHover)
 			}
 			btnNew.Children(func() {
 				ui.Icon(c, IconPlus).Width(12).Height(12).TextColor(t.TextMuted)
@@ -777,7 +776,7 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			v.lastTabRect = targetRect
 		}
 
-		if len(tiledBgs) > 0 || (v.tabPillReady && v.lastTabRect.W > 0) {
+		if len(tabBackgrounds) > 0 || (v.tabPillReady && v.lastTabRect.W > 0) {
 			targetX := v.lastTabRect.X
 			targetW := v.lastTabRect.W
 			pillX := tabBar.AnimateWith("ws_tab_pill_x", targetX, 180*time.Millisecond, ui.EaseOut)
@@ -786,8 +785,8 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			pillH := v.lastTabRect.H
 
 			tabBar.Draw(func(p *ui.Painter, r ui.Rect) {
-				// 1. 先绘制平铺未聚焦 Tab 的淡灰卡片底色 (处于底层，支持悬停高亮反馈)
-				for _, tb := range tiledBgs {
+				// 1. 绘制未聚焦标签的卡片底色，保留悬停与平铺状态反馈。
+				for _, tb := range tabBackgrounds {
 					p.Fill(tb.rect, tb.color, t.Radius-2)
 				}
 
@@ -799,8 +798,9 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 						W: pillW,
 						H: pillH,
 					}
-					p.Shadow(pillRect, t.Radius-2, 0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.08))
+					p.Shadow(pillRect, t.Radius-2, 0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.12))
 					p.Fill(pillRect, t.Surface, t.Radius-2)
+					p.Stroke(pillRect, ColTabActiveBorder, t.Radius-2, 1)
 				}
 			})
 		}
@@ -819,20 +819,20 @@ func (v *AppView) renderWorkspace(c *ui.Context, t *ui.Theme) {
 			case LayoutDualSplit:
 				ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Children(func() {
 					v.renderTilePane(c, t, 0)
-					ui.Box(c).Width(1).Background(ui.Hex("#334155"))
+					ui.Box(c).Width(1).Background(ColTerminalBorder)
 					v.renderTilePane(c, t, 1)
 				})
 			case LayoutQuadGrid:
 				ui.Column(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Background(ColTerminalBg).Children(func() {
 					ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 						v.renderTilePane(c, t, 0)
-						ui.Box(c).Width(1).Background(ui.Hex("#334155"))
+						ui.Box(c).Width(1).Background(ColTerminalBorder)
 						v.renderTilePane(c, t, 1)
 					})
-					ui.Box(c).Height(1).Background(ui.Hex("#334155"))
+					ui.Box(c).Height(1).Background(ColTerminalBorder)
 					ui.Row(c).Grow(1).Shrink(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 						v.renderTilePane(c, t, 2)
-						ui.Box(c).Width(1).Background(ui.Hex("#334155"))
+						ui.Box(c).Width(1).Background(ColTerminalBorder)
 						v.renderTilePane(c, t, 3)
 					})
 				})
@@ -946,7 +946,7 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 		// 概览仪表盘标签
 		homeIconCol := t.TextMuted
 		if isFocused {
-			homeIconCol = t.Accent
+			homeIconCol = t.Text
 		}
 		ui.Icon(c, IconHome).Width(12).Height(12).TextColor(homeIconCol)
 		ui.Text(c, "概览").FontSize(12).Bold().TextColor(textColor).SingleLine()
@@ -983,7 +983,7 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 			// 所属主机专属色标点 (7x7 与会话标签对齐)
 			ui.Box(c).Width(7).Height(7).Radius(3.5).Background(hColor.Accent)
 			// 文件图标
-			fileIconCol := ui.Hex("#0284C7")
+			fileIconCol := t.Text
 			if !isFocused && !isTiled {
 				fileIconCol = t.TextMuted
 			}
@@ -1002,11 +1002,11 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 
 	// 多终端平铺布局下展示所属窗格标识（双分屏展示“左”/“右”，四宫格展示“1”~“4”，概览页绝不显示）
 	if posLabel != "" {
-		badgeBg := ui.Hex("#E2E8F0")
-		badgeFg := ui.Hex("#475569")
+		badgeBg := ColBadgeGrayBg
+		badgeFg := ColBadgeGrayText
 		if isFocused {
 			badgeBg = ColBadgeBlueBg
-			badgeFg = t.Accent
+			badgeFg = ColInteraction
 		}
 		ui.Row(c).Background(badgeBg).Padding(1, 5).Radius(3).Children(func() {
 			ui.Text(c, posLabel).FontSize(9.5).Bold().TextColor(badgeFg)
@@ -1018,7 +1018,7 @@ func (v *AppView) renderTabItems(c *ui.Context, t *ui.Theme, tab WorkspaceTab, i
 		closeBtn := ui.Row(c).Width(16).Height(16).Radius(3).Center()
 		closeIconCol := t.TextMuted
 		if closeBtn.Hovered() {
-			closeBtn.Background(ui.Hex("#E2E8F0"))
+			closeBtn.Background(ColSidebarHover)
 			closeIconCol = t.Text
 		}
 		closeBtn.Children(func() {
@@ -1298,7 +1298,7 @@ func (v *AppView) renderTabContent(c *ui.Context, t *ui.Theme, tabIndex int, onC
 
 // renderLayoutSwitcher 渲染多标签栏右侧的快速布局控制胶囊组
 func (v *AppView) renderLayoutSwitcher(c *ui.Context, t *ui.Theme) {
-	ui.Row(c).Height(28).AlignItems(ui.Center).Gap(1).Padding(2).Background(ui.Hex("#E2E8F0")).Radius(5).Children(func() {
+	ui.Row(c).Height(28).AlignItems(ui.Center).Gap(1).Padding(2).Background(t.SurfacePressed).Radius(5).Children(func() {
 		// 单视窗全屏
 		v.renderLayoutBtn(c, t, LayoutSingle, IconLayoutSingle, "单视窗 (Alt+1)")
 		// 左右双 Tab 并列
@@ -1314,9 +1314,9 @@ func (v *AppView) renderLayoutBtn(c *ui.Context, t *ui.Theme, mode WorkspaceLayo
 	iconColor := t.TextMuted
 	if isActive {
 		btn.Background(t.Surface)
-		iconColor = t.Accent
+		iconColor = t.Text
 	} else if btn.Hovered() {
-		btn.Background(ui.Hex("#F1F5F9"))
+		btn.Background(t.SurfaceHover)
 		iconColor = t.Text
 	}
 	btn.Children(func() {
@@ -1334,7 +1334,7 @@ func (v *AppView) renderTilePane(c *ui.Context, t *ui.Theme, paneIndex int) {
 
 	paneBox := ui.Column(c).Grow(1).Shrink(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Background(ColTerminalBg)
 	if isActivePane {
-		paneBox.Border(1, t.Accent)
+		paneBox.Border(1, ColInteraction)
 	} else {
 		paneBox.Border(1, ui.Transparent)
 	}
@@ -1365,15 +1365,15 @@ func (v *AppView) renderEmptyPane(c *ui.Context, t *ui.Theme, paneIndex int) {
 		v.setActivePane(paneIndex)
 	}
 	emptyBox.Children(func() {
-		ui.Icon(c, IconTerminal).Width(32).Height(32).TextColor(ui.Hex("#475569"))
-		ui.Text(c, fmt.Sprintf("分屏窗格 %d", paneIndex+1)).FontSize(13).Bold().TextColor(ui.Hex("#94A3B8"))
+		ui.Icon(c, IconTerminal).Width(32).Height(32).TextColor(ColTerminalIcon)
+		ui.Text(c, fmt.Sprintf("分屏窗格 %d", paneIndex+1)).FontSize(13).Bold().TextColor(ColTerminalMuted)
 		ui.Row(c).Gap(t.Space(2)).Children(func() {
 			if ui.Button(c, "+ 本地终端").Clicked() {
 				v.activePaneIndex = paneIndex
 				v.openNewLocalTerminal()
 			}
 			if len(v.app.Hosts) > 0 {
-				btnConn := ui.PrimaryButton(c, "连接主机...")
+				btnConn := terminalPrimaryButton(c, "连接主机...")
 				btnConn.Menu(func(m *ui.Menu) {
 					for _, h := range v.app.Hosts {
 						host := h
@@ -1384,7 +1384,7 @@ func (v *AppView) renderEmptyPane(c *ui.Context, t *ui.Theme, paneIndex int) {
 					}
 				})
 			} else {
-				if ui.PrimaryButton(c, "+ 添加 SSH 主机").Clicked() {
+				if terminalPrimaryButton(c, "+ 添加 SSH 主机").Clicked() {
 					v.openCreateModal()
 				}
 			}
@@ -1443,7 +1443,7 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 			// 1. 顶部欢迎与标语
 			ui.Column(c).Gap(t.Space(2)).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-					ui.Icon(c, IconBrand).TextColor(t.Accent).Width(20).Height(20)
+					ui.Icon(c, IconBrand).TextColor(t.Text).Width(20).Height(20)
 					ui.Text(c, "GoShell 启动台").FontSize(17).Bold().TextColor(t.Text)
 				})
 				ui.Text(c, "轻量、高效的现代终端与远程运维工作区，从下方快捷开始或直接连接").FontSize(12).TextColor(t.TextMuted)
@@ -1469,7 +1469,7 @@ func (v *AppView) renderInspectorDashboard(c *ui.Context, t *ui.Theme) {
 			recentHosts := v.getRecentHosts()
 			ui.Column(c).Gap(t.Space(2.5)).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-					ui.Icon(c, IconActivity).TextColor(t.Accent).Width(15).Height(15)
+					ui.Icon(c, IconActivity).TextColor(t.Text).Width(15).Height(15)
 					ui.Text(c, "最近连接").FontSize(14).Bold().TextColor(t.Text)
 				})
 
@@ -1499,7 +1499,7 @@ func (v *AppView) renderQuickActionCard(c *ui.Context, t *ui.Theme, icon *ui.SVG
 	}
 	card.Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
-			ui.Icon(c, icon).TextColor(t.Accent).Width(16).Height(16)
+			ui.Icon(c, icon).TextColor(t.Text).Width(16).Height(16)
 			ui.Text(c, title).FontSize(13).Bold().TextColor(t.Text)
 		})
 		ui.Text(c, desc).FontSize(11).TextColor(t.TextMuted)
@@ -1598,7 +1598,7 @@ func (v *AppView) renderStatusBar(c *ui.Context, t *ui.Theme) {
 			ui.Box(c).Width(1).Height(12).Background(t.Border)
 			btnVer := ui.Row(c).AlignItems(ui.Center).Padding(1, 4).Radius(t.Radius - 3).Tooltip("关于 GoShell")
 			if btnVer.Hovered() {
-				btnVer.Background(ui.Hex("#DFE5EC"))
+				btnVer.Background(ColSidebarHover)
 			}
 			btnVer.Children(func() {
 				ui.Text(c, "GoShell v"+version.Version).FontSize(11).TextColor(t.TextMuted)
@@ -1621,7 +1621,7 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 				titleIcon = IconServer
 			}
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-				ui.Icon(c, titleIcon).Width(18).Height(18).TextColor(t.Accent)
+				ui.Icon(c, titleIcon).Width(18).Height(18).TextColor(t.Text)
 				ui.Text(c, title).FontSize(16).Bold().TextColor(t.Text)
 			})
 			ui.Text(c, "配置 SSH 远程主机连接凭据，密码与秘钥将由 AES-256 本地加密").FontSize(12).TextColor(t.TextMuted)
@@ -1633,8 +1633,8 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 			}
 
 			// 认证方式选择 (Segmented)
-			ui.Row(c).Height(30).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
-				pwdBg := ui.Hex("#E2E8F0")
+			ui.Row(c).Height(30).Background(t.SurfacePressed).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
+				pwdBg := t.SurfacePressed
 				pwdFg := ColSidebarText
 				if v.formAuthType == "password" {
 					pwdBg = t.Surface
@@ -1646,7 +1646,7 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 					v.formAuthType = "password"
 				})
 
-				keyBg := ui.Hex("#E2E8F0")
+				keyBg := t.SurfacePressed
 				keyFg := ColSidebarText
 				if v.formAuthType == "key" || v.formAuthType == string(model.AuthTypeKeyFile) {
 					keyBg = t.Surface
@@ -1661,7 +1661,7 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 					}
 				})
 
-				localBg := ui.Hex("#E2E8F0")
+				localBg := t.SurfacePressed
 				localFg := ColSidebarText
 				if v.formAuthType == "local" {
 					localBg = t.Surface
@@ -1736,7 +1736,7 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 					// 本地 Shell 类型分段单选
 					ui.Column(c).Gap(4).Children(func() {
 						ui.Text(c, "Shell 类型").FontSize(12).Bold().TextColor(t.Text)
-						ui.Row(c).Height(30).Background(ui.Hex("#E2E8F0")).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
+						ui.Row(c).Height(30).Background(t.SurfacePressed).Radius(t.Radius).Padding(2, 2).Gap(2).AlignItems(ui.Center).Children(func() {
 							options := []struct {
 								id   string
 								name string
@@ -1747,7 +1747,7 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 								{"cmd", "CMD"},
 							}
 							for _, opt := range options {
-								bg := ui.Hex("#E2E8F0")
+								bg := t.SurfacePressed
 								fg := ColSidebarText
 								if v.formShellType == opt.id || (v.formShellType == "" && opt.id == "auto") {
 									bg = t.Surface
@@ -1772,7 +1772,7 @@ func (v *AppView) renderHostModal(c *ui.Context, t *ui.Theme) {
 				if ui.Button(c, "取消").Clicked() {
 					v.modalOpen = false
 				}
-				if ui.PrimaryButton(c, "保存配置").Clicked() {
+				if primaryButton(c, "保存配置").Clicked() {
 					v.saveHostForm()
 				}
 			})
@@ -1832,7 +1832,7 @@ func (v *AppView) renderRenameModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &v.renameModalOpen, func() {
 		ui.Column(c).Width(380).Gap(t.Space(3)).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-				ui.Icon(c, IconBrand).Width(18).Height(18).TextColor(t.Accent)
+				ui.Icon(c, IconBrand).Width(18).Height(18).TextColor(t.Text)
 				ui.Text(c, "重命名标签页").FontSize(16).Bold().TextColor(t.Text)
 			})
 
@@ -1857,7 +1857,7 @@ func (v *AppView) renderRenameModal(c *ui.Context, t *ui.Theme) {
 					v.renameModalOpen = false
 				}
 
-				if ui.PrimaryButton(c, "确定").Clicked() {
+				if primaryButton(c, "确定").Clicked() {
 					v.saveRenameTab()
 				}
 			})
@@ -1877,7 +1877,7 @@ func (v *AppView) renderAboutModal(c *ui.Context, t *ui.Theme) {
 			})
 
 			// 2. 核心技术致谢 (轻量精简两行列表)
-			ui.Column(c).Fill().Background(ui.Hex("#F8FAFC")).Border(1, ui.Hex("#E2E8F0")).Padding(t.Space(2.5), t.Space(3)).Radius(t.Radius).Gap(t.Space(2)).Children(func() {
+			ui.Column(c).Fill().Background(ColSurfaceSubtle).Border(1, t.Border).Padding(t.Space(2.5), t.Space(3)).Radius(t.Radius).Gap(t.Space(2)).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "终端引擎").FontSize(12).TextColor(t.TextMuted)
 					ui.Spacer(c)
@@ -1885,7 +1885,7 @@ func (v *AppView) renderAboutModal(c *ui.Context, t *ui.Theme) {
 					ui.Text(c, " (MIT)").FontSize(11).TextColor(t.TextMuted)
 				})
 
-				ui.Box(c).Height(1).Background(ui.Hex("#E2E8F0"))
+				ui.Box(c).Height(1).Background(t.Border)
 
 				ui.Row(c).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "UI 框架").FontSize(12).TextColor(t.TextMuted)
@@ -1900,7 +1900,7 @@ func (v *AppView) renderAboutModal(c *ui.Context, t *ui.Theme) {
 
 			// 4. 关闭按钮
 			ui.Row(c).Center().Children(func() {
-				if ui.PrimaryButton(c, "确定").Width(96).Clicked() {
+				if primaryButton(c, "确定").Width(96).Clicked() {
 					v.aboutModalOpen = false
 				}
 			})
@@ -2028,7 +2028,7 @@ func (v *AppView) renderQuickConnectModal(c *ui.Context, t *ui.Theme) {
 		ui.Column(c).Width(440).Gap(t.Space(3)).Children(func() {
 			// 1. 标题区
 			ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-				ui.Icon(c, IconServer).Width(18).Height(18).TextColor(t.Accent)
+				ui.Icon(c, IconServer).Width(18).Height(18).TextColor(t.Text)
 				ui.Text(c, "快速连接").FontSize(16).Bold().TextColor(t.Text)
 			})
 
@@ -2094,7 +2094,7 @@ func (v *AppView) renderQuickConnectModal(c *ui.Context, t *ui.Theme) {
 					v.quickConnectModalOpen = false
 				}
 
-				if ui.PrimaryButton(c, "连接").Clicked() {
+				if primaryButton(c, "连接").Clicked() {
 					v.submitQuickConnect()
 				}
 			})
