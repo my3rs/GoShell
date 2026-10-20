@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/logo.svg" width="96" height="96" alt="GoShell Logo" />
+  <img src="assets/brand/app-icon.png" width="96" height="96" alt="GoShell Logo" />
 </p>
 
 <h1 align="center">GoShell</h1>
@@ -120,6 +120,8 @@ make build-windows-arm64
 # 打包为离线压缩包，内含主程序与配套运行库
 make package-windows
 ```
+
+打包后，`bin/GoShell-windows-amd64.zip` 始终更新为本次构建，同时保留带版本号的压缩包。Windows EXE 的文件图标在构建时由 `assets/brand/app-icon.ico` 嵌入；更新图标后需重新打包并使用新产物。
 
 ### macOS 编译
 ```bash

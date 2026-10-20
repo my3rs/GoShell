@@ -108,9 +108,11 @@ package-windows: build-windows
 	@echo "==> 打包离线 zip 压缩包 (包含 GoShell.exe, ghostty-vt.dll 与 busybox.exe)..."
 	@cd $(OUT_DIR) && rm -f $(APP_NAME)-v$(VERSION)-windows-amd64.zip && \
 	zip -9 $(APP_NAME)-v$(VERSION)-windows-amd64.zip $(APP_NAME).exe ghostty-vt.dll busybox.exe
+	@cp $(OUT_DIR)/$(APP_NAME)-v$(VERSION)-windows-amd64.zip $(OUT_DIR)/$(APP_NAME)-windows-amd64.zip
 	@echo "==> 构建完成！"
 	@echo "    [单文件便携版] $(OUT_DIR)/$(APP_NAME).exe (内嵌VT引擎与BusyBox，独立单文件即开即用)"
 	@echo "    [离线压缩包]   $(OUT_DIR)/$(APP_NAME)-v$(VERSION)-windows-amd64.zip"
+	@echo "    [最新压缩包]   $(OUT_DIR)/$(APP_NAME)-windows-amd64.zip"
 
 ## build-darwin: 编译 macOS 原生版本
 build-darwin:
