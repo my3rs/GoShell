@@ -34,50 +34,6 @@ GoShell 是一个跨平台桌面终端与远程主机管理工具。采用 Go �
 
 ---
 
-## 系统架构
-
-```mermaid
-flowchart TD
-    subgraph UI ["表现层"]
-        AppView["主窗口视图"]
-        Workspace["工作区与分屏管理"]
-        TermSession["终端会话"]
-        EditorTab["文本编辑器"]
-        AppView --> Workspace
-        Workspace --> TermSession
-        Workspace --> EditorTab
-    end
-
-    subgraph App ["业务层"]
-        AppMgr["应用上下文与状态管理"]
-        AppView --> AppMgr
-    end
-
-    subgraph Core ["核心能力层"]
-        SSHClient["SSH 客户端与信道"]
-        SFTPClient["SFTP 客户端与传输队列"]
-        Storage["本地存储"]
-        Security["数据加密服务"]
-        
-        AppMgr --> SSHClient
-        AppMgr --> SFTPClient
-        AppMgr --> Storage
-        Storage --> Security
-    end
-
-    subgraph Runtime ["运行时与终端支持"]
-        Ghostty["Ghostty-VT 终端仿真引擎"]
-        LocalPTY["PTY / ConPTY 适配器"]
-        Shells["本地 Shell (CMD / PowerShell / BusyBox / 原生 Shell)"]
-        
-        TermSession --> Ghostty
-        TermSession --> LocalPTY
-        LocalPTY --> Shells
-    end
-```
-
----
-
 ## 快速上手
 
 ### 环境要求
