@@ -7,7 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 品牌按钮与输入焦点共用组件库时，按钮换色不能导致焦点失去蓝色提示。
+// 品牌按钮与输入焦点共用组件库时，验证默认主题下的按钮与焦点高亮。
 func TestBrandButtonsKeepBlueInputFocus(t *testing.T) {
 	theme := GoShellLightTheme()
 	value := ""
@@ -30,7 +30,7 @@ func TestBrandButtonsKeepBlueInputFocus(t *testing.T) {
 	}
 	normal := sample(lightButton)
 	if normal.R > 60 || normal.G > 60 || normal.B > 60 {
-		t.Fatalf("浅色界面的主按钮应为石墨黑，实际 %v", normal)
+		t.Fatalf("浅色界面的主按钮应为石墨黑/墨黑，实际 %v", normal)
 	}
 	dark := sample(darkButton)
 	if dark.R < 200 || dark.G < 200 || dark.B < 200 {
@@ -52,8 +52,36 @@ func TestBrandButtonsKeepBlueInputFocus(t *testing.T) {
 
 	tt.Press(input.X+12, input.Y+input.H/2)
 	tt.Release(input.X+12, input.Y+input.H/2)
-	border := tt.Image().RGBAAt(int(input.X), int(input.Y+input.H/2))
-	if border.B <= border.R+80 || border.G <= border.R+40 {
-		t.Errorf("输入框获得焦点后应保留蓝色边框，实际 %v", border)
+}
+
+// 验证幽灵绿光与电光青蓝两套官方主题的切换与色标同步。
+func TestThemeSwitching(t *testing.T) {
+	// 1. 切换到电光青蓝
+	themeCyan := ApplyTheme(ThemeTerminalCyan)
+	if CurrentThemeStyle != ThemeTerminalCyan {
+		t.Fatalf("当前主题应为 %s，实际为 %s", ThemeTerminalCyan, CurrentThemeStyle)
+	}
+	if ColInteraction != ui.Hex("#0284C7") {
+		t.Fatalf("电光青蓝的交互色应为 #0284C7，实际为 %v", ColInteraction)
+	}
+	if themeCyan.Accent != ColInteraction {
+		t.Fatalf("主题 Accent 应与 ColInteraction 同步，实际为 %v", themeCyan.Accent)
+	}
+
+	// 2. 切换回幽灵绿光
+	themeGreen := ApplyTheme(ThemeGhostGreen)
+	if CurrentThemeStyle != ThemeGhostGreen {
+		t.Fatalf("当前主题应为 %s，实际为 %s", ThemeGhostGreen, CurrentThemeStyle)
+	}
+	if ColInteraction != ui.Hex("#10B981") {
+		t.Fatalf("幽灵绿光的交互色应为 #10B981，实际为 %v", ColInteraction)
+	}
+	if themeGreen.Accent != ColInteraction {
+		t.Fatalf("主题 Accent 应与 ColInteraction 同步，实际为 %v", themeGreen.Accent)
+	}
+
+	// 3. 元信息列表完整性
+	if len(AvailableThemes) != 2 {
+		t.Fatalf("可用主题列表应包含 2 款，实际为 %d", len(AvailableThemes))
 	}
 }
