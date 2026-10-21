@@ -119,6 +119,9 @@ type AppView struct {
 	// 关于弹窗状态
 	aboutModalOpen bool
 
+	// 偏好设置弹窗状态
+	settingsModalOpen bool
+
 	// 快速连接（临时 SSH 会话）弹窗状态
 	quickConnectModalOpen bool
 	quickConnectTarget    string // 原始输入或一键粘贴内容 (如 root@1.2.3.4:22 或 ssh root@1.2.3.4)
@@ -132,9 +135,15 @@ type AppView struct {
 // NewAppView 初始化主窗口 UI 状态
 func NewAppView(application *app.App) *AppView {
 	spring := ui.Snappy
+	initialThemeStyle := ThemeGhostGreen
+	if application != nil && application.Store != nil {
+		initialThemeStyle = application.Store.GetSetting("theme_style", ThemeGhostGreen)
+	}
+	initialTheme := ApplyTheme(initialThemeStyle)
+
 	v := &AppView{
 		app:             application,
-		theme:           GoShellLightTheme(),
+		theme:           initialTheme,
 		sidebarWidth:    240, // 紧凑侧边栏宽度
 		sidebarTab:      0,   // 默认展示主机节点
 		localIP:         getLocalIP(),
@@ -196,6 +205,11 @@ func (v *AppView) View(c *ui.Context) {
 	// 6. 快速连接（临时 SSH 会话）弹窗
 	if v.quickConnectModalOpen {
 		v.renderQuickConnectModal(c, t)
+	}
+
+	// 7. 独立偏好设置弹窗
+	if v.settingsModalOpen {
+		v.renderSettingsModal(c, t)
 	}
 }
 
@@ -314,6 +328,9 @@ func (v *AppView) renderSidebar(c *ui.Context, t *ui.Theme) {
 		} else {
 			v.renderSidebarFilePanel(c, t)
 		}
+
+		// 4. 左侧栏底部工具栏 (设置入口与主题指示)
+		v.renderSidebarFooter(c, t)
 	})
 }
 
@@ -440,6 +457,28 @@ func (v *AppView) renderSidebarFilePanel(c *ui.Context, t *ui.Theme) {
 		v.openFileInEditor(activeSession, entry)
 	})
 	v.showHiddenFiles = activeSession.ShowHidden
+}
+
+// renderSidebarFooter 渲染左侧栏底部固定工具条（设置入口）
+func (v *AppView) renderSidebarFooter(c *ui.Context, t *ui.Theme) {
+	ui.Row(c).Height(30).Padding(0, t.Space(1)).AlignItems(ui.Center).Children(func() {
+		// 设置按钮（带齿轮图标与文字提示）
+		btnSettings := ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Padding(4, 6).Radius(t.Radius - 2).Tooltip("系统偏好设置")
+		if btnSettings.Hovered() {
+			btnSettings.Background(ColSidebarHover)
+		}
+		settingsFg := ColSidebarText
+		if btnSettings.Hovered() {
+			settingsFg = t.Text
+		}
+		btnSettings.Children(func() {
+			ui.Icon(c, IconSettings).Width(13.5).Height(13.5).TextColor(settingsFg)
+			ui.Text(c, "偏好设置").FontSize(11.5).TextColor(settingsFg)
+		})
+		if btnSettings.Clicked() {
+			v.settingsModalOpen = true
+		}
+	})
 }
 
 // 辅助渲染单行主机项 (复刻现代侧边栏菜单按钮，支持整行拖拽排序、双击连接与右键快捷操作)
@@ -1902,6 +1941,109 @@ func (v *AppView) renderAboutModal(c *ui.Context, t *ui.Theme) {
 			ui.Row(c).Center().Children(func() {
 				if primaryButton(c, "确定").Width(96).Clicked() {
 					v.aboutModalOpen = false
+				}
+			})
+		})
+	})
+}
+
+// setThemeStyle 切换运行时主题并持久化保存至本地存储
+func (v *AppView) setThemeStyle(style string) {
+	v.theme = ApplyTheme(style)
+	if v.app != nil && v.app.Store != nil {
+		_ = v.app.Store.SetSetting("theme_style", style)
+	}
+}
+
+// renderSettingsModal 渲染独立偏好设置弹窗 (规范标准：400px 宽度，双主题卡片切换)
+func (v *AppView) renderSettingsModal(c *ui.Context, t *ui.Theme) {
+	ui.Modal(c, &v.settingsModalOpen, func() {
+		ui.Column(c).Width(400).Gap(t.Space(3.5)).Children(func() {
+			// 1. 头部区域：图标 + 标题 + 副标题 + 右侧关闭按钮
+			ui.Column(c).Gap(t.Space(1)).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+						ui.Icon(c, IconSettings).Width(16).Height(16).TextColor(t.Text)
+						ui.Text(c, "偏好设置").FontSize(16).Bold().TextColor(t.Text)
+					})
+					ui.Spacer(c)
+					btnClose := ui.ButtonBase(c).Tooltip("关闭").Width(24).Height(24).Radius(t.Radius - 2).Center()
+					if btnClose.Hovered() {
+						btnClose.Background(ColSidebarHover)
+					}
+					btnClose.Children(func() {
+						ui.Icon(c, IconClose).Width(14).Height(14).TextColor(t.TextMuted)
+					})
+					if btnClose.Clicked() {
+						v.settingsModalOpen = false
+					}
+				})
+				ui.Text(c, "个性化外观主题与运行环境偏好").FontSize(12).TextColor(t.TextMuted)
+			})
+
+			// 分割线
+			ui.Box(c).Height(1).Background(t.Border)
+
+			// 2. 主题外观选择区域
+			ui.Column(c).Gap(t.Space(2)).Children(func() {
+				ui.Text(c, "外观主题 (Theme)").FontSize(12).Bold().TextColor(t.Text)
+
+				for _, item := range AvailableThemes {
+					themeMeta := item
+					isSelected := CurrentThemeStyle == themeMeta.ID
+
+					cardBorder := t.Border
+					cardBg := t.Surface
+					if isSelected {
+						cardBorder = t.Accent
+						cardBg = t.SurfaceHover
+					}
+
+					card := ui.Row(c).Fill().Padding(t.Space(2.5), t.Space(3)).Radius(t.Radius).AlignItems(ui.Center).Gap(t.Space(2.5))
+					card.Border(1, cardBorder).Background(cardBg)
+					if card.Hovered() && !isSelected {
+						card.Background(t.SurfaceHover)
+					}
+
+					card.Children(func() {
+						// 品牌徽章色块 (Logo 底座色 + 强调光斑)
+						ui.Box(c).Width(28).Height(28).Radius(6).Background(themeMeta.BaseColor).Center().Children(func() {
+							ui.Box(c).Width(10).Height(10).Radius(5).Background(themeMeta.AccentColor)
+						})
+
+						// 主题文字信息
+						ui.Column(c).Grow(1).Gap(2).Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1.5)).Children(func() {
+								ui.Text(c, themeMeta.Name).FontSize(13).Bold().TextColor(t.Text)
+								if isSelected {
+									ui.Box(c).Padding(1, 6).Radius(t.Radius).Background(ColBadgeBlueBg).Children(func() {
+										ui.Text(c, "使用中").FontSize(10).Bold().TextColor(ColBadgeBlueText)
+									})
+								}
+							})
+							ui.Text(c, themeMeta.Description).FontSize(11).TextColor(t.TextMuted)
+						})
+
+						// 选中对勾指示
+						if isSelected {
+							ui.Icon(c, IconCheck).Width(16).Height(16).TextColor(t.Accent)
+						}
+					})
+
+					if card.Clicked() {
+						v.setThemeStyle(themeMeta.ID)
+					}
+				}
+			})
+
+			// 分割线
+			ui.Box(c).Height(1).Background(t.Border)
+
+			// 3. 底部操作栏：右侧放置完成按钮
+			ui.Row(c).AlignItems(ui.Center).Children(func() {
+				ui.Spacer(c)
+				if primaryButton(c, "完成").Width(80).Clicked() {
+					v.settingsModalOpen = false
 				}
 			})
 		})
